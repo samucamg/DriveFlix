@@ -1,14 +1,15 @@
 // ==========================================================================
-// DriveFlix - Built-in OAuth 2.0 Refresh Token Generator Page & API
+// DriveFlin — OAuth 2.0 Refresh Token Generator Cloudflare Worker
+// Domain: generator.driveflin.org
 // ==========================================================================
 
-export const oauthHtml = `<!DOCTYPE html>
+const htmlContent = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DriveFlin — Gerador de Conexão Google Drive</title>
-  <link rel="icon" type="image/png" href="/assets/img/favicon.png">
+  <link rel="icon" type="image/png" href="https://driveflin.org/assets/img/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Cascadia+Code:wght@400;600&display=swap" rel="stylesheet">
@@ -48,13 +49,19 @@ export const oauthHtml = `<!DOCTYPE html>
       text-align: center;
       margin-bottom: 32px;
     }
-    .logo {
-      font-size: 28px;
+    .brand-logo {
+      max-width: 240px;
+      height: auto;
+      margin-bottom: 16px;
+      filter: drop-shadow(0 4px 12px rgba(0,0,0,0.5));
+    }
+    .logo-text {
+      font-size: 26px;
       font-weight: 800;
       margin-bottom: 8px;
       letter-spacing: -0.5px;
     }
-    .logo span { color: var(--accent); }
+    .logo-text span { color: var(--accent); }
     .subtitle {
       font-size: 15px;
       color: var(--text-muted);
@@ -119,6 +126,11 @@ export const oauthHtml = `<!DOCTYPE html>
       color: #6e6e80;
       margin-top: 5px;
     }
+    .form-help a {
+      color: #93c5fd;
+      text-decoration: none;
+    }
+    .form-help a:hover { text-decoration: underline; }
     .btn {
       display: inline-flex;
       align-items: center;
@@ -231,17 +243,19 @@ export const oauthHtml = `<!DOCTYPE html>
 <body>
   <div class="wrapper">
     <div class="header">
-      <div style="margin-bottom: 16px;">
-        <img src="/assets/img/DriveFlin.png" alt="DriveFlin" style="max-width: 240px; height: auto;" onerror="this.src='https://raw.githubusercontent.com/samucamg/DriveFlix/main/assets/driveflin-web-assets/DriveFlin.png'">
+      <div>
+        <a href="https://driveflin.org">
+          <img class="brand-logo" src="https://driveflin.org/assets/img/DriveFlin.png" alt="DriveFlin" onerror="this.src='https://raw.githubusercontent.com/samucamg/DriveFlix/main/assets/driveflin-web-assets/DriveFlin.png'">
+        </a>
       </div>
-      <div class="logo">🎬 Drive<span>Flin</span></div>
+      <div class="logo-text">🎬 Drive<span>Flin</span> Generator</div>
       <p class="subtitle">Gerador Seguro de Conexão Google Drive (OAuth 2.0)</p>
     </div>
 
     <div class="alert alert-warning">
       <span>💡</span>
       <div>
-        <strong>100% Privado e Seguro:</strong> Este gerador roda diretamente no seu próprio Cloudflare Worker. Seus códigos e chaves não passam por nenhum servidor de terceiros.
+        <strong>100% Privado e Seguro:</strong> Este gerador roda de ponta a ponta no Cloudflare Workers em <code>generator.driveflin.org</code>. Suas chaves e códigos de autorização são trocados diretamente com os servidores da Google, sem intermediários.
       </div>
     </div>
 
@@ -254,7 +268,7 @@ export const oauthHtml = `<!DOCTYPE html>
       <div class="form-group">
         <label for="clientId">Client ID</label>
         <input type="text" id="clientId" placeholder="ex: 123456789-xxxx.apps.googleusercontent.com">
-        <div class="form-help">Criado no Google Cloud Console em Credenciais > ID do cliente OAuth (Desktop App).</div>
+        <div class="form-help">Criado no <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console ↗</a> em Credenciais > ID do cliente OAuth (Aplicativo para Computador).</div>
       </div>
 
       <div class="form-group">
@@ -277,7 +291,7 @@ export const oauthHtml = `<!DOCTYPE html>
       <div class="form-group">
         <label for="authCode">Cole a URL de redirecionamento ou o código:</label>
         <input type="text" id="authCode" placeholder="http://localhost/?code=4/0Axxxx... ou o código 4/0A...">
-        <div class="form-help">Após autorizar no Google, seu navegador mostrará uma página de erro (normal). Copie o endereço completo da barra de navegação e cole acima.</div>
+        <div class="form-help">Após autorizar no Google, seu navegador mostrará uma página em branco ou erro de conexão (normal, pois o localhost não está ativo). Copie o endereço completo da barra de URL e cole acima.</div>
       </div>
 
       <button class="btn btn-primary" id="exchangeBtn" onclick="exchangeToken()">
@@ -304,7 +318,6 @@ export const oauthHtml = `<!DOCTYPE html>
 
     <div class="footer">
       <a href="https://driveflin.org" target="_blank">← Ir para driveflin.org</a> &nbsp;•&nbsp; 
-      <a href="/web/index.html">Interface do Jellyfin</a> &nbsp;•&nbsp; 
       <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console ↗</a> &nbsp;•&nbsp; 
       <a href="https://github.com/samucamg/DriveFlix" target="_blank">GitHub ↗</a>
     </div>
@@ -388,3 +401,108 @@ export const oauthHtml = `<!DOCTYPE html>
   </script>
 </body>
 </html>`;
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    // CORS headers
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    };
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    // API: Exchange code for refresh token
+    if (url.pathname === '/api/oauth/exchange' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        let code = (body.code || '').trim();
+        const clientId = (body.clientId || '').trim();
+        const clientSecret = (body.clientSecret || '').trim();
+
+        if (!code || !clientId || !clientSecret) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Campos obrigatórios ausentes: code, clientId ou clientSecret.'
+          }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+
+        // Handle case where user pasted full URL
+        if (code.includes('code=')) {
+          try {
+            const parsed = new URL(code.startsWith('http') ? code : 'http://' + code);
+            const extracted = parsed.searchParams.get('code');
+            if (extracted) code = extracted;
+          } catch {
+            const m = code.match(/code=([^&]+)/);
+            if (m) code = decodeURIComponent(m[1]);
+          }
+        }
+
+        // Exchange with Google
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code: code,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: 'http://localhost',
+            grant_type: 'authorization_code',
+          }),
+        });
+
+        const tokenData = await tokenRes.json();
+
+        if (!tokenRes.ok || tokenData.error) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: tokenData.error_description || tokenData.error || 'Falha ao trocar código com o Google.',
+            details: tokenData
+          }), {
+            status: tokenRes.status || 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          refresh_token: tokenData.refresh_token,
+          access_token: tokenData.access_token,
+          expires_in: tokenData.expires_in,
+          token_type: tokenData.token_type,
+          scope: tokenData.scope,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: err.message || 'Erro interno no gerador.'
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // Default: Serve the HTML page
+    return new Response(htmlContent, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'public, max-age=300',
+        ...corsHeaders
+      }
+    });
+  }
+};

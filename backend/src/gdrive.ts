@@ -40,7 +40,7 @@ export class GoogleDrive {
     // Assume token expires in data.expires_in seconds, subtract 60s for safety buffer
     this.tokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000;
     
-    return this.accessToken;
+    return this.accessToken || '';
   }
 
   async listFolder(folderId: string = 'root') {
