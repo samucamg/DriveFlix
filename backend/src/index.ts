@@ -297,19 +297,83 @@ app.post("/setup/delete", async (c) => {
 
 // JELLYFIN MOCK API
 
-const serverInfo = {
-  LocalAddress: "http://localhost:8787",
-  ServerName: "Serverless Jellyfin",
-  Version: "12.0.0",
-  ProductName: "Jellyfin Server",
-  OperatingSystem: "Linux",
-  Id: "serverless_jellyfin_id_123",
-  StartupWizardCompleted: true,
+const getSystemInfo = (c: any) => {
+  const url = new URL(c.req.url);
+  const origin = `${url.protocol}//${url.host}`;
+  const port = url.port ? parseInt(url.port) : (url.protocol === "https:" ? 443 : 80);
+  return c.json({
+    SystemUpdateLevel: "Release",
+    OperatingSystemDisplayName: "Linux",
+    PackageName: "jellyfin",
+    HasPendingRestart: false,
+    IsShuttingDown: false,
+    OperatingSystem: "Linux",
+    SupportsLibraryMonitor: false,
+    WebSocketPortNumber: port,
+    CompletedInstallations: [],
+    CanSelfRestart: false,
+    CanLaunchWebBrowser: false,
+    ProgramDataPath: "/config",
+    ItemsByNamePath: "/config/data/metadata/itemsbyname",
+    CachePath: "/cache",
+    LogPath: "/config/log",
+    InternalMetadataPath: "/config/data/metadata",
+    TranscodingTempPath: "/config/transcodes",
+    HasUpdateAvailable: false,
+    EncoderLocation: "NotFound",
+    CastReceiverApplications: [
+      {
+        Id: "F007D354",
+        Name: "Google Cast",
+      },
+    ],
+    LocalAddress: origin,
+    WanAddress: origin,
+    ServerName: "DriveFlix",
+    Version: "10.9.11",
+    ProductName: "Jellyfin Server",
+    Id: "serverless_jellyfin_id_123",
+    StartupWizardCompleted: true,
+  });
 };
 
 // 1. System Info (Server Discovery)
-app.get("/System/Info/Public", (c) => c.json(serverInfo));
-app.get("/System/Info", (c) => c.json(serverInfo));
+app.get("/System/Info/Public", getSystemInfo);
+app.get("/system/info/public", getSystemInfo);
+app.get("/System/Info", getSystemInfo);
+app.get("/system/info", getSystemInfo);
+app.get("/System/Endpoint", (c) => c.json({ IsLocal: false }));
+app.get("/system/endpoint", (c) => c.json({ IsLocal: false }));
+
+// WebSocket support for Jellyfin live session updates
+app.get("/socket", (c) => {
+  const upgradeHeader = c.req.header("Upgrade") || c.req.header("upgrade");
+  if (upgradeHeader === "websocket") {
+    const pair = new (globalThis as any).WebSocketPair();
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    (server as any).accept();
+    server.addEventListener("message", (event: any) => {
+      try {
+        const data = typeof event.data === "string" ? JSON.parse(event.data) : {};
+        if (data.MessageType === "KeepAlive") {
+          server.send(JSON.stringify({ MessageType: "KeepAlive" }));
+        }
+      } catch (e) {}
+    });
+    return new Response(null, { status: 101, webSocket: client } as any);
+  }
+  return c.text("WebSocket upgrade expected", 426);
+});
+app.get("/socket/*", (c) => {
+  const upgradeHeader = c.req.header("Upgrade") || c.req.header("upgrade");
+  if (upgradeHeader === "websocket") {
+    const pair = new (globalThis as any).WebSocketPair();
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    (server as any).accept();
+    return new Response(null, { status: 101, webSocket: client } as any);
+  }
+  return c.text("WebSocket upgrade expected", 426);
+});
 
 // Web UI Requirements & Administration
 const defaultBrandingConfig = {
@@ -781,10 +845,20 @@ app.post("/Users/New", async (c) => {
 
 app.post("/Users/AuthenticateByName", handleAuth);
 app.post("/Users/authenticatebyname", handleAuth);
+app.post("/users/authenticatebyname", handleAuth);
+app.post("/users/AuthenticateByName", handleAuth);
 
 async function handleAuth(c: any) {
-  const body = await c.req.json();
-  const { Username } = body;
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    try {
+      body = await c.req.parseBody();
+    } catch (e2) {}
+  }
+  const Username = body.Username || body.username || c.req.query("Username") || c.req.query("username") || "admin";
+  const Pw = body.Pw || body.pw || body.Password || body.password || "";
 
   const { results } = await c.env.DB.prepare(
     "SELECT * FROM Users WHERE Name = ?",
@@ -795,19 +869,61 @@ async function handleAuth(c: any) {
     return c.json({ error: "Invalid username" }, 401);
   }
   const user: any = results[0];
+  if (user.Password && Pw && user.Password !== Pw) {
+    return c.json({ error: "Invalid password" }, 401);
+  }
+
   let policy = defaultPolicy;
   try { if (user.Policy) policy = { ...defaultPolicy, ...JSON.parse(user.Policy) }; } catch (e) {}
+  let config = defaultUserConfig;
+  try { if (user.Configuration) config = { ...defaultUserConfig, ...JSON.parse(user.Configuration) }; } catch (e) {}
+
+  const clientName = c.req.header("X-Emby-Client") || "Jellyfin Client";
+  const deviceName = c.req.header("X-Emby-Device-Name") || "Device";
+  const deviceId = c.req.header("X-Emby-Device-Id") || "device_123";
+  const clientVersion = c.req.header("X-Emby-Client-Version") || "10.9.11";
 
   return c.json({
     User: {
       Name: user.Name,
       ServerId: "serverless_jellyfin_id_123",
       Id: user.Id,
+      HasPassword: true,
+      HasConfiguredPassword: true,
+      HasConfiguredEasyPassword: false,
+      EnableAutoLogin: false,
+      LastLoginDate: new Date().toISOString(),
+      LastActivityDate: new Date().toISOString(),
+      Configuration: config,
       Policy: policy,
     },
     SessionInfo: {
-      UserId: user.Id,
+      PlayState: {
+        CanSeek: true,
+        IsPaused: false,
+        IsMuted: false,
+        RepeatMode: "RepeatNone",
+      },
+      AdditionalUsers: [],
+      Capabilities: {
+        PlayableMediaTypes: ["Audio", "Video"],
+        SupportedCommands: [],
+        SupportsMediaControl: true,
+        SupportsPersistentIdentifier: true,
+      },
+      RemoteEndPoint: "127.0.0.1",
+      PlayableMediaTypes: ["Audio", "Video"],
       Id: "session_123",
+      UserId: user.Id,
+      UserName: user.Name,
+      Client: clientName,
+      LastActivityDate: new Date().toISOString(),
+      DeviceName: deviceName,
+      DeviceId: deviceId,
+      ApplicationVersion: clientVersion,
+      IsActive: true,
+      SupportsMediaControl: true,
+      ServerId: "serverless_jellyfin_id_123",
     },
     AccessToken: "fake_jwt_token_12345",
     ServerId: "serverless_jellyfin_id_123",
@@ -880,10 +996,12 @@ app.delete("/Users/:userId", async (c) => {
 
 
 // Post-login UI Requirements
-app.post(
-  "/Sessions/Capabilities/Full",
-  (c) => new Response(null, { status: 204 }),
-);
+app.post("/Sessions/Capabilities", (c) => new Response(null, { status: 204 }));
+app.post("/sessions/capabilities", (c) => new Response(null, { status: 204 }));
+app.post("/Sessions/Capabilities/Full", (c) => new Response(null, { status: 204 }));
+app.post("/sessions/capabilities/full", (c) => new Response(null, { status: 204 }));
+app.post("/Sessions/Logout", (c) => new Response(null, { status: 204 }));
+app.post("/sessions/logout", (c) => new Response(null, { status: 204 }));
 app.post("/Sessions/Playing", (c) => new Response(null, { status: 204 }));
 app.post("/Sessions/Playing/Progress", async (c) => {
   try {
@@ -1013,10 +1131,40 @@ app.delete("/Users/:userId/FavoriteItems/:itemId", async (c) => {
   });
 });
 app.post("/Sessions/Viewing", (c) => new Response(null, { status: 204 }));
-app.get("/DisplayPreferences/usersettings", (c) => c.json({ CustomPrefs: {} }));
-app.get("/System/Endpoint", (c) => c.json({ IsLocal: false }));
+const handleDisplayPrefs = (c: any) => {
+  const id = c.req.param("id") || "usersettings";
+  return c.json({
+    Id: id,
+    ViewType: "Poster",
+    SortBy: "SortName",
+    IndexBy: "None",
+    RememberIndexing: false,
+    PrimaryImageAspectRatio: 0,
+    CustomPrefs: {},
+    ScrollDirection: "Vertical",
+    ShowBackdrop: true,
+    RememberSorting: false,
+    SortOrder: "Ascending",
+    ShowSidebar: false,
+    Client: "Jellyfin",
+  });
+};
+app.get("/DisplayPreferences/:id", handleDisplayPrefs);
+app.post("/DisplayPreferences/:id", (c) => c.body(null, 204));
+app.get("/displaypreferences/:id", handleDisplayPrefs);
+app.post("/displaypreferences/:id", (c) => c.body(null, 204));
+
+app.get("/Notifications/Summary", (c) => c.json({ UnreadCount: 0, MaxUnreadNotificationLevel: "Normal" }));
+app.get("/notifications/summary", (c) => c.json({ UnreadCount: 0, MaxUnreadNotificationLevel: "Normal" }));
+app.get("/GroupingOptions", (c) => c.json([]));
+app.get("/groupingoptions", (c) => c.json([]));
+app.get("/Users/:userId/GroupingOptions", (c) => c.json([]));
+app.get("/users/:userId/groupingoptions", (c) => c.json([]));
+
+app.get("/QuickConnect/Status", (c) => c.json({ Authenticated: false }));
+app.get("/quickconnect/status", (c) => c.json({ Authenticated: false }));
+
 app.get("/Playback/BitrateTest", (c) => c.text("ok"));
-app.get("/System/Info", (c) => c.json(serverInfo));
 
 // 3. Views (Bibliotecas: Series-Dub, etc)
 app.get("/Library/VirtualFolders", async (c) => {
@@ -3520,12 +3668,23 @@ app.all("/Videos/:itemId/main.m3u8", streamHandler);
 app.all("/Videos/:itemId/master.m3u8", streamHandler);
 app.all("/Videos/:itemId/*", streamHandler);
 app.all("/Videos/:itemId", streamHandler);
+app.all("/videos/:itemId/stream", streamHandler);
+app.all("/videos/:itemId/stream.:ext{[a-zA-Z0-9]+}", streamHandler);
+app.all("/videos/:itemId/main.m3u8", streamHandler);
+app.all("/videos/:itemId/master.m3u8", streamHandler);
+app.all("/videos/:itemId/*", streamHandler);
+app.all("/videos/:itemId", streamHandler);
 
 app.all("/Audio/:itemId/stream", streamHandler);
 app.all("/Audio/:itemId/stream.:ext{[a-zA-Z0-9]+}", streamHandler);
 app.all("/Audio/:itemId/universal", streamHandler);
 app.all("/Audio/:itemId/*", streamHandler);
 app.all("/Audio/:itemId", streamHandler);
+app.all("/audio/:itemId/stream", streamHandler);
+app.all("/audio/:itemId/stream.:ext{[a-zA-Z0-9]+}", streamHandler);
+app.all("/audio/:itemId/universal", streamHandler);
+app.all("/audio/:itemId/*", streamHandler);
+app.all("/audio/:itemId", streamHandler);
 
 const handleImageUpload = async (c: any) => {
   try {
