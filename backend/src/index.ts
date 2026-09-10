@@ -330,7 +330,7 @@ const getSystemInfo = (c: any) => {
     LocalAddress: origin,
     WanAddress: origin,
     ServerName: "DriveFlix",
-    Version: "10.9.11",
+    Version: "12.0.0",
     ProductName: "Jellyfin Server",
     Id: "serverless_jellyfin_id_123",
     StartupWizardCompleted: true,
@@ -881,7 +881,7 @@ async function handleAuth(c: any) {
   const clientName = c.req.header("X-Emby-Client") || "Jellyfin Client";
   const deviceName = c.req.header("X-Emby-Device-Name") || "Device";
   const deviceId = c.req.header("X-Emby-Device-Id") || "device_123";
-  const clientVersion = c.req.header("X-Emby-Client-Version") || "10.9.11";
+  const clientVersion = c.req.header("X-Emby-Client-Version") || "12.0.0";
 
   return c.json({
     User: {
