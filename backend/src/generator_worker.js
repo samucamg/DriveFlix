@@ -118,14 +118,6 @@ const htmlContent = `<!DOCTYPE html>
       font-family: inherit;
       transition: all 0.2s;
     }
-    select {
-      cursor: pointer;
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23a3a3b2' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 14px center;
-      padding-right: 40px;
-    }
     input[type="text"]:focus, select:focus {
       outline: none;
       border-color: var(--accent);
@@ -155,6 +147,8 @@ const htmlContent = `<!DOCTYPE html>
       cursor: pointer;
       transition: all 0.2s;
       border: none;
+      text-decoration: none;
+      box-sizing: border-box;
     }
     .btn-primary {
       background: var(--accent);
@@ -263,6 +257,21 @@ const htmlContent = `<!DOCTYPE html>
       font-family: monospace;
       font-size: 11px;
     }
+    .direct-link {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      background: #1e1e24;
+      border-radius: 6px;
+      text-align: center;
+      font-size: 13px;
+    }
+    .direct-link a {
+      color: #60a5fa;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .direct-link a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -270,7 +279,7 @@ const htmlContent = `<!DOCTYPE html>
     <div class="header">
       <div>
         <a href="https://driveflin.org">
-          <img class="brand-logo" src="https://raw.githubusercontent.com/samucamg/DriveFlix/main/assets/driveflin-web-assets/DriveFlin.png" alt="DriveFlin">
+          <img class="brand-logo" src="https://raw.githubusercontent.com/samucamg/DriveFlix/main/assets/DriveFlin.png" alt="DriveFlin">
         </a>
       </div>
       <div class="logo-text">🎬 Drive<span>Flin</span> Generator</div>
@@ -290,42 +299,36 @@ const htmlContent = `<!DOCTYPE html>
         <span class="step-badge">1</span>
         Credenciais do Google Cloud
       </div>
-      
-      <div class="form-group">
-        <label for="appType">Tipo da Credencial criada no Google Cloud:</label>
-        <select id="appType" onchange="updateRedirectUriHelp()">
-          <option value="desktop" selected>App para Computador (Desktop App) — Recomendado (Sem erro de URI)</option>
-          <option value="web">Aplicativo da Web (Web Application) — Retorno direto</option>
-        </select>
-        <div id="typeHelpDesktop" class="alert alert-info" style="margin-top: 10px; margin-bottom: 0;">
-          <span>ℹ️</span>
-          <div>
-            <strong>Tipo Computador (Desktop):</strong> O Google autoriza o redirecionamento para <code>http://localhost</code> nativamente. Não é necessário configurar URIs de redirecionamento no Google Cloud!
-          </div>
-        </div>
-        <div id="typeHelpWeb" class="alert alert-warning" style="margin-top: 10px; margin-bottom: 0; display: none;">
-          <span>⚠️</span>
-          <div>
-            <strong>Importante para Aplicativo da Web:</strong> Para evitar o erro <span class="pill">redirect_uri_mismatch</span> do Google, acesse o <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>, clique no seu cliente e em <strong>URIs de redirecionamento autorizados</strong> adicione exatamente:<br>
-            <span class="pill" id="webRedirectUriDisplay">https://generator.driveflin.org</span>
-          </div>
+
+      <div class="alert alert-info" style="margin-bottom: 16px;">
+        <span>ℹ️</span>
+        <div style="font-size: 12px; line-height: 1.6;">
+          <strong>Como obter no Google Cloud Console:</strong><br>
+          1. Acesse <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color: #bfdbfe; font-weight: 600;">Google Cloud Console → Credenciais ↗</a>.<br>
+          2. Clique em <strong>+ CRIAR CREDENCIAIS → ID do cliente OAuth</strong>.<br>
+          3. Em Tipo de aplicativo, escolha <strong>App para computador</strong> (Desktop) ou <strong>Aplicativo da Web</strong>.<br>
+          <em>* Se escolher Aplicativo da Web, adicione <code>http://localhost</code> nas URIs de redirecionamento autorizados.</em>
         </div>
       </div>
-
+      
       <div class="form-group">
         <label for="clientId">Client ID <span style="color: var(--accent);">*</span></label>
-        <input type="text" id="clientId" placeholder="ex: 1032237895629-xxxx.apps.googleusercontent.com">
+        <input type="text" id="clientId" placeholder="ex: 370045112228-xxxx.apps.googleusercontent.com" oninput="saveInputs(); updateDirectLink();">
       </div>
 
       <div class="form-group">
         <label for="clientSecret">Client Secret <span style="color: var(--accent);">*</span></label>
-        <input type="text" id="clientSecret" placeholder="ex: GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx">
-        <div class="form-help">Ambos são obtidos no <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console ↗</a> em APIs e Serviços > Credenciais.</div>
+        <input type="text" id="clientSecret" placeholder="ex: GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx" oninput="saveInputs()">
       </div>
 
-      <button class="btn btn-secondary" onclick="openGoogleAuth()">
+      <button class="btn btn-secondary" id="authBtn" onclick="handleAuthClick()">
         🔗 1. Abrir Autorização Google
       </button>
+
+      <div id="directLinkBox" class="direct-link">
+        👉 Janela bloqueada pelo navegador? <a id="directLinkAnchor" href="#" target="_blank" rel="noopener noreferrer">Clique aqui para abrir a autorização da Google</a>
+      </div>
+
       <div id="authError" style="color: #f87171; font-size: 13px; margin-top: 10px; display: none;"></div>
     </div>
 
@@ -337,10 +340,10 @@ const htmlContent = `<!DOCTYPE html>
       </div>
 
       <div class="form-group">
-        <label for="authCode">Cole a URL completa da página ou o código:</label>
-        <input type="text" id="authCode" placeholder="http://localhost/?code=4/0Axxxx... ou cole o código 4/0A...">
+        <label for="authCode">Cole a URL completa ou o código retornado pela Google:</label>
+        <input type="text" id="authCode" placeholder="http://localhost/?code=4/0Axxxx... ou 4/0Axxxx...">
         <div class="form-help">
-          Após autorizar na Google, seu navegador mostrará uma página em branco ou erro de conexão (normal, pois o localhost não roda um servidor). Copie o endereço completo da barra de endereços (URL) e cole acima.
+          Após autorizar na Google, seu navegador mostrará uma página em branco ou erro de conexão no localhost (isto é normal). Copie o endereço completo da barra de endereços (URL) e cole acima.
         </div>
       </div>
 
@@ -374,58 +377,74 @@ const htmlContent = `<!DOCTYPE html>
   </div>
 
   <script>
-    function updateRedirectUriHelp() {
-      const type = document.getElementById('appType').value;
-      const helpDesktop = document.getElementById('typeHelpDesktop');
-      const helpWeb = document.getElementById('typeHelpWeb');
-      const webDisplay = document.getElementById('webRedirectUriDisplay');
-      webDisplay.innerText = window.location.origin;
+    function getAuthUrl(cid) {
+      return 'https://accounts.google.com/o/oauth2/auth'
+        + '?client_id=' + encodeURIComponent(cid)
+        + '&redirect_uri=' + encodeURIComponent('http://localhost')
+        + '&response_type=code'
+        + '&access_type=offline'
+        + '&scope=' + encodeURIComponent('https://www.googleapis.com/auth/drive')
+        + '&prompt=consent';
+    }
 
-      if (type === 'desktop') {
-        helpDesktop.style.display = 'flex';
-        helpWeb.style.display = 'none';
+    function updateDirectLink() {
+      const cid = (document.getElementById('clientId').value || '').trim();
+      const directBox = document.getElementById('directLinkBox');
+      const directAnchor = document.getElementById('directLinkAnchor');
+      if (cid) {
+        const url = getAuthUrl(cid);
+        directAnchor.href = url;
+        directBox.style.display = 'block';
       } else {
-        helpDesktop.style.display = 'none';
-        helpWeb.style.display = 'flex';
+        directBox.style.display = 'none';
       }
     }
 
-    function openGoogleAuth() {
-      const cid = document.getElementById('clientId').value.trim();
-      const cs = document.getElementById('clientSecret').value.trim();
-      const type = document.getElementById('appType').value;
+    function handleAuthClick() {
+      const cid = (document.getElementById('clientId').value || '').trim();
+      const cs = (document.getElementById('clientSecret').value || '').trim();
       const err = document.getElementById('authError');
 
-      if (!cid || !cs) {
-        err.innerText = 'Preencha o Client ID E o Client Secret antes de abrir a autorização.';
+      if (!cid) {
+        err.innerText = 'Preencha o Client ID antes de abrir a autorização.';
         err.style.display = 'block';
         return;
       }
       err.style.display = 'none';
 
-      // Persist in sessionStorage so credentials survive redirects
-      sessionStorage.setItem('df_cid', cid);
-      sessionStorage.setItem('df_cs', cs);
-      sessionStorage.setItem('df_type', type);
+      saveInputs();
+      updateDirectLink();
 
-      const redirectUri = type === 'web' ? window.location.origin : 'http://localhost';
+      const authUrl = getAuthUrl(cid);
+      const win = window.open(authUrl, '_blank');
+      if (!win) {
+        document.getElementById('directLinkBox').style.display = 'block';
+      }
+    }
 
-      const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth'
-        + '?scope=' + encodeURIComponent('https://www.googleapis.com/auth/drive')
-        + '&response_type=code'
-        + '&access_type=offline'
-        + '&prompt=consent'
-        + '&client_id=' + encodeURIComponent(cid)
-        + '&redirect_uri=' + encodeURIComponent(redirectUri);
-      
-      window.open(authUrl, '_blank');
+    function saveInputs() {
+      try {
+        const cid = document.getElementById('clientId').value;
+        const cs = document.getElementById('clientSecret').value;
+        localStorage.setItem('df_cid', cid);
+        localStorage.setItem('df_cs', cs);
+      } catch (_) {}
+    }
+
+    function loadSavedInputs() {
+      try {
+        const cid = localStorage.getItem('df_cid');
+        const cs = localStorage.getItem('df_cs');
+        if (cid) document.getElementById('clientId').value = cid;
+        if (cs) document.getElementById('clientSecret').value = cs;
+        updateDirectLink();
+      } catch (_) {}
     }
 
     async function exchangeToken() {
-      const cid = document.getElementById('clientId').value.trim() || sessionStorage.getItem('df_cid') || '';
-      const cs = document.getElementById('clientSecret').value.trim() || sessionStorage.getItem('df_cs') || '';
-      const type = document.getElementById('appType').value;
-      const codeInput = document.getElementById('authCode').value.trim();
+      const cid = (document.getElementById('clientId').value || '').trim();
+      const cs = (document.getElementById('clientSecret').value || '').trim();
+      const rawCode = (document.getElementById('authCode').value || '').trim();
       const err = document.getElementById('exchangeError');
       const btn = document.getElementById('exchangeBtn');
       const resultBox = document.getElementById('resultBox');
@@ -433,32 +452,50 @@ const htmlContent = `<!DOCTYPE html>
       err.style.display = 'none';
       resultBox.style.display = 'none';
 
-      if (!cid || !cs || !codeInput) {
-        err.innerText = 'Preencha todos os campos (Client ID, Client Secret e Código).';
+      if (!cid || !cs || !rawCode) {
+        err.innerText = 'Preencha todos os campos (Client ID, Client Secret e o Código de Retorno).';
         err.style.display = 'block';
         return;
       }
 
+      let code = rawCode;
+      if (code.includes('code=')) {
+        try {
+          const parsed = new URL(code.startsWith('http') ? code : 'http://' + code);
+          const extracted = parsed.searchParams.get('code');
+          if (extracted) code = extracted;
+        } catch (_) {
+          const m = code.match(/code=([^&]+)/);
+          if (m) code = decodeURIComponent(m[1]);
+        }
+      }
+
       btn.disabled = true;
       btn.innerText = 'Trocando código com a Google...';
-
-      const redirectUri = type === 'web' ? window.location.origin : 'http://localhost';
 
       try {
         const res = await fetch('/api/oauth/exchange', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
-            code: codeInput, 
+            code: code, 
             clientId: cid, 
             clientSecret: cs,
-            redirectUri: redirectUri
+            redirectUri: 'http://localhost'
           })
         });
         const data = await res.json();
 
         if (!data.success) {
-          throw new Error(data.error || 'Erro ao obter Refresh Token da Google.');
+          let msg = data.error || 'Falha ao trocar código com o Google.';
+          if (data.details && data.details.error === 'invalid_grant') {
+            msg = 'Código expirado ou inválido (invalid_grant). Gere um novo código clicando em "1. Abrir Autorização Google".';
+          } else if (data.details && data.details.error === 'redirect_uri_mismatch') {
+            msg = 'Erro redirect_uri_mismatch. Certifique-se de que a credencial no Google Cloud foi criada como "App para computador" ou adicione "http://localhost" nas URIs autorizadas de seu Aplicativo da Web.';
+          } else if (data.details && data.details.error === 'invalid_client') {
+            msg = 'Client ID ou Client Secret incorretos (invalid_client). Verifique se digitou corretamente.';
+          }
+          throw new Error(msg);
         }
 
         document.getElementById('tokenVal').innerText = data.refresh_token;
@@ -485,35 +522,8 @@ const htmlContent = `<!DOCTYPE html>
       });
     }
 
-    // Auto-detect code in URL if Google redirected directly
     window.addEventListener('DOMContentLoaded', () => {
-      updateRedirectUriHelp();
-
-      const savedCid = sessionStorage.getItem('df_cid');
-      const savedCs = sessionStorage.getItem('df_cs');
-      const savedType = sessionStorage.getItem('df_type');
-
-      if (savedCid) document.getElementById('clientId').value = savedCid;
-      if (savedCs) document.getElementById('clientSecret').value = savedCs;
-      if (savedType) {
-        document.getElementById('appType').value = savedType;
-        updateRedirectUriHelp();
-      }
-
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get('code');
-      const error = params.get('error');
-
-      if (error) {
-        const err = document.getElementById('authError');
-        err.innerText = 'Erro retornado pela Google: ' + error;
-        err.style.display = 'block';
-      } else if (code) {
-        document.getElementById('authCode').value = code;
-        if (savedCid && savedCs) {
-          exchangeToken();
-        }
-      }
+      loadSavedInputs();
     });
   </script>
 </body>
@@ -559,7 +569,7 @@ export default {
             const parsed = new URL(code.startsWith('http') ? code : 'http://' + code);
             const extracted = parsed.searchParams.get('code');
             if (extracted) code = extracted;
-          } catch {
+          } catch (_) {
             const m = code.match(/code=([^&]+)/);
             if (m) code = decodeURIComponent(m[1]);
           }
