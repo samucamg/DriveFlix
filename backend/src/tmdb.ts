@@ -8,7 +8,7 @@ export interface TmdbResult {
   releaseDate: string;
 }
 
-const DEFAULT_TMDB_API_KEY = "844dba0bfd8f3a4f3799f6130ef9e335";
+const DEFAULT_TMDB_API_KEY = "";
 
 export function cleanMediaTitle(rawTitle: string): { query: string; year?: string } {
   let str = rawTitle;
