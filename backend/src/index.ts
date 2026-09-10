@@ -48,9 +48,142 @@ function getImageTag(fileId: string | null | undefined): string | undefined {
   return "img_" + Math.abs(hash).toString(36);
 }
 
+import { injectScript } from "./inject";
+import { oauthHtml } from "./oauth_page";
+
+let schemaReady = false;
+async function ensureSchema(db: D1Database) {
+  if (schemaReady) return;
+  try {
+    await db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS Users (
+        Id TEXT PRIMARY KEY,
+        Name TEXT NOT NULL,
+        Password TEXT NOT NULL,
+        Policy TEXT,
+        Configuration TEXT
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS Libraries (
+        Id TEXT PRIMARY KEY,
+        Name TEXT NOT NULL,
+        FolderId TEXT NOT NULL,
+        CollectionType TEXT,
+        PrimaryImageFileId TEXT
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS Items (
+        Id TEXT PRIMARY KEY,
+        ParentId TEXT,
+        LibraryId TEXT,
+        Type TEXT NOT NULL,
+        Name TEXT NOT NULL,
+        Overview TEXT,
+        IndexNumber INTEGER,
+        ParentIndexNumber INTEGER,
+        FolderId TEXT,
+        FileId TEXT,
+        EncryptedName TEXT,
+        Size INTEGER,
+        PrimaryImageFileId TEXT,
+        BackdropImageFileId TEXT,
+        TmdbId TEXT,
+        MediaInfo TEXT,
+        DateCreated DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS PlaybackProgress (
+        Id TEXT PRIMARY KEY,
+        UserId TEXT,
+        ItemId TEXT,
+        PositionTicks INTEGER,
+        IsPaused BOOLEAN,
+        LastUpdated DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS Backups (
+        Id TEXT PRIMARY KEY,
+        Timestamp TEXT NOT NULL,
+        Filename TEXT NOT NULL,
+        FileId TEXT,
+        Size INTEGER,
+        Data TEXT
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS DebugLogs (
+        time TEXT,
+        log TEXT
+      )`)
+    ]);
+
+    const user = await db.prepare("SELECT Id FROM Users LIMIT 1").first();
+    if (!user) {
+      await db.prepare("INSERT INTO Users (Id, Name, Password) VALUES (?, ?, ?)")
+        .bind("user_admin_123", "admin", "Filmes@2026")
+        .run();
+    }
+    schemaReady = true;
+  } catch (e) {
+    console.error("ensureSchema error:", e);
+  }
+}
+
+app.use("*", async (c, next) => {
+  if (c.env?.DB && !schemaReady) {
+    await ensureSchema(c.env.DB);
+  }
+  await next();
+});
+
+// ROTAS DO GERADOR DE TOKEN OAUTH
+app.get("/oauth", (c) => c.html(oauthHtml));
+app.get("/token", (c) => c.html(oauthHtml));
+app.get("/generator", (c) => c.html(oauthHtml));
+
+app.post("/api/oauth/exchange", async (c) => {
+  try {
+    const { code, clientId, clientSecret } = await c.req.json();
+    if (!code || !clientId || !clientSecret) {
+      return c.json({ success: false, error: "Parâmetros incompletos: informe code, clientId e clientSecret." }, 400);
+    }
+
+    let authCode = code.trim();
+    if (authCode.startsWith("http")) {
+      try {
+        const parsed = new URL(authCode);
+        authCode = parsed.searchParams.get("code") || authCode;
+      } catch (e) {}
+    }
+
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: authCode,
+        client_id: clientId.trim(),
+        client_secret: clientSecret.trim(),
+        redirect_uri: "http://localhost",
+        grant_type: "authorization_code",
+      }),
+    });
+
+    const data: any = await tokenRes.json();
+    if (data.error) {
+      return c.json({
+        success: false,
+        error: data.error_description || data.error || "Falha ao trocar código de autorização.",
+      }, 400);
+    }
+
+    return c.json({
+      success: true,
+      refresh_token: data.refresh_token,
+      access_token: data.access_token,
+      expires_in: data.expires_in,
+    });
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message || err.toString() }, 500);
+  }
+});
+
 // PROXY DA INTERFACE WEB DO JELLYFIN
 app.get("/", (c) => c.redirect("/web/index.html"));
-import { injectScript } from "./inject";
+
 
 app.post("/debug_log", async (c) => {
   const body = await c.req.text();

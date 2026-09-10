@@ -15,6 +15,12 @@
   <a href="#-arquitetura"><img src="https://img.shields.io/badge/Database-Cloudflare%20D1-blueviolet?style=for-the-badge&logo=sqlite" alt="Cloudflare D1"></a>
 </p>
 
+<p align="center">
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/samucamg/DriveFlix" target="_blank">
+    <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" height="38"/>
+  </a>
+</p>
+
 ---
 
 ## 📌 Visão Geral / Overview
@@ -42,6 +48,8 @@ Com o DriveFlix, você tem todos os recursos do Jellyfin — interface web moder
 - 🔐 **Descriptografia de Nomes via Rclone-Crypt**: Suporte a nomes de arquivos ofuscados ou criptografados via Rclone no Google Drive.
 - ⏰ **Tarefas Agendadas Automáticas (Cron Trigger)**: Sincronização periódica a cada hora (`0 * * * *`) para indexar novos arquivos adicionados ao Google Drive.
 - 🎧 **Separação de Mídias Inteligente**: Carrosséis distintos de "Continuar assistindo" (para filmes e séries) e "Continuar Escutando" (para músicas).
+- 🔑 **Gerador de Conexão Google Drive Embutido (`/oauth`)**: Obtenha seu Refresh Token de forma 100% segura e privada diretamente no seu Worker, sem enviar credenciais para servidores de terceiros.
+
 
 ---
 

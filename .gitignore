@@ -46,3 +46,7 @@ insert.sql
 Thumbs.db
 .vscode/
 .idea/
+
+# Standalone Documentation Website for VPS (not tracked in core repo)
+website_vps/
+
