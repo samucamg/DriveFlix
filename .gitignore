@@ -39,6 +39,7 @@ clean_db.py
 updates.sql
 insert.sql
 *.tmp
+*run_sync*
 
 # OS & Editor files
 .DS_Store

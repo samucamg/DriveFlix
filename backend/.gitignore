@@ -33,6 +33,7 @@ test_*.js
 clean_db.py
 fix_episodes.py
 make_backup.py
+*run_sync*
 
 # OS & IDE
 .DS_Store
