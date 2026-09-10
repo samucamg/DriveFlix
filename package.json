@@ -1,0 +1,15 @@
+{
+  "name": "driveflix",
+  "version": "1.0.0",
+  "description": "Serverless Jellyfin Media Server running on Cloudflare Workers and Google Drive",
+  "author": "samucamg",
+  "license": "MIT",
+  "scripts": {
+    "dev": "npm run dev --prefix backend",
+    "deploy": "npm run deploy --prefix backend",
+    "d1:init": "npx wrangler d1 execute jellyfin_db_prod --file=backend/schema.sql"
+  },
+  "workspaces": [
+    "backend"
+  ]
+}
