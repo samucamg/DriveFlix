@@ -48,6 +48,36 @@ function getImageTag(fileId: string | null | undefined): string | undefined {
   return "img_" + Math.abs(hash).toString(36);
 }
 
+
+export const SERVER_ID = "639b4876bbb8b346ea020612bfe01ba8";
+export const DEFAULT_ADMIN_ID = "ee09da3140518fedd8b0f27b8b59bafb";
+export const DEFAULT_SESSION_ID = "7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d";
+
+export function toValidUuid(str: string | null | undefined): string {
+  if (!str) return DEFAULT_ADMIN_ID;
+  const s = str.trim();
+  if (s === DEFAULT_ADMIN_ID || s === "admin" || s.toLowerCase() === "me" || s === DEFAULT_ADMIN_ID) {
+    return DEFAULT_ADMIN_ID;
+  }
+  if (s === SERVER_ID || s === SERVER_ID) {
+    return SERVER_ID;
+  }
+  const clean = s.replace(/-/g, "").toLowerCase();
+  if (/^[0-9a-f]{32}$/.test(clean)) {
+    return clean;
+  }
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57, h3 = 0x61c88647, h4 = 0x9e3779b9;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ ch, 2246822507);
+    h4 = Math.imul(h4 ^ ch, 3266489909);
+  }
+  const toHex = (n: number) => (n >>> 0).toString(16).padStart(8, "0");
+  return (toHex(h1) + toHex(h2) + toHex(h3) + toHex(h4)).toLowerCase();
+}
+
 import { injectScript } from "./inject";
 import { oauthHtml } from "./oauth_page";
 
@@ -114,7 +144,7 @@ async function ensureSchema(db: D1Database) {
     const user = await db.prepare("SELECT Id FROM Users LIMIT 1").first();
     if (!user) {
       await db.prepare("INSERT INTO Users (Id, Name, Password) VALUES (?, ?, ?)")
-        .bind("user_admin_123", "admin", "Filmes@2026")
+        .bind(DEFAULT_ADMIN_ID, "admin", "Filmes@2026")
         .run();
     }
     schemaReady = true;
@@ -332,7 +362,7 @@ const getSystemInfo = (c: any) => {
     ServerName: "DriveFlix",
     Version: "12.0.0",
     ProductName: "Jellyfin Server",
-    Id: "serverless_jellyfin_id_123",
+    Id: SERVER_ID,
     StartupWizardCompleted: true,
   });
 };
@@ -700,7 +730,7 @@ app.delete("/ScheduledTasks/Running/:taskId", (c) => {
 app.get("/System/Logs", (c) => c.json([]));
 app.get("/Plugins", (c) => c.json([]));
 app.get("/Plugins/Configuration", (c) => c.json({}));
-app.get("/Library/MediaFolders", async (c) => {
+const handleMediaFolders = async (c: any) => {
   const { results } = await c.env.DB.prepare("SELECT * FROM Libraries").all();
   return c.json({
     Items: results.map((r: any) => ({
@@ -710,11 +740,17 @@ app.get("/Library/MediaFolders", async (c) => {
       Type: "CollectionFolder",
       IsFolder: true,
       CollectionType: r.CollectionType || (r.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
+      PrimaryImageItemId: r.Id,
+      PrimaryImageTag: getImageTag(r.PrimaryImageFileId) || "cached",
+      ImageTags: { Primary: getImageTag(r.PrimaryImageFileId) || "cached" },
       SubFolders: [],
     })),
     TotalRecordCount: results.length,
   });
-});
+};
+app.get("/Library/MediaFolders", handleMediaFolders);
+app.get("/library/mediafolders", handleMediaFolders);
+
 app.get("/Encoding/CustomPath", (c) => c.json({}));
 app.get("/Encoding/CodecCapabilities", (c) => c.json([]));
 app.get("/Encoding/CodecInformation", (c) => c.json([]));
@@ -753,8 +789,8 @@ app.get("/users/public", async (c) => {
     return c.json(
       results.map((u: any) => ({
         Name: u.Name,
-        Id: u.Id,
-        ServerId: "serverless_jellyfin_id_123",
+        Id: toValidUuid(u.Id),
+        ServerId: SERVER_ID,
         HasPassword: true,
         HasConfiguredPassword: true,
       }))
@@ -763,14 +799,15 @@ app.get("/users/public", async (c) => {
     return c.json([
       {
         Name: "admin",
-        Id: "user_admin_123",
-        ServerId: "serverless_jellyfin_id_123",
+        Id: DEFAULT_ADMIN_ID,
+        ServerId: SERVER_ID,
         HasPassword: true,
         HasConfiguredPassword: true,
       },
     ]);
   }
 });
+app.get("/Users/Public", async (c) => c.redirect("/users/public", 307));
 
 // 2. Authentication and User Management
 app.get("/Users", async (c) => {
@@ -787,8 +824,8 @@ app.get("/Users", async (c) => {
         try { if (u.Configuration) config = { ...defaultUserConfig, ...JSON.parse(u.Configuration) }; } catch (e) {}
         return {
           Name: u.Name,
-          Id: u.Id,
-          ServerId: "serverless_jellyfin_id_123",
+          Id: toValidUuid(u.Id),
+          ServerId: SERVER_ID,
           HasPassword: true,
           HasConfiguredPassword: true,
           Policy: policy,
@@ -800,8 +837,8 @@ app.get("/Users", async (c) => {
     return c.json([
       {
         Name: "admin",
-        Id: "user_admin_123",
-        ServerId: "serverless_jellyfin_id_123",
+        Id: DEFAULT_ADMIN_ID,
+        ServerId: SERVER_ID,
         HasPassword: true,
         HasConfiguredPassword: true,
         Policy: defaultPolicy,
@@ -810,13 +847,14 @@ app.get("/Users", async (c) => {
     ]);
   }
 });
+app.get("/users", async (c) => c.redirect("/Users", 307));
 
 app.post("/Users/New", async (c) => {
   let body: any = {};
   try { body = await c.req.json(); } catch (e) {}
   const name = body.Name || "Novo Usuario";
   const password = body.Password || "";
-  const id = "user_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
+  const id = crypto.randomUUID().replace(/-/g, "").toLowerCase();
 
   try { await c.env.DB.prepare("ALTER TABLE Users ADD COLUMN Policy TEXT").run(); } catch (e) {}
   try { await c.env.DB.prepare("ALTER TABLE Users ADD COLUMN Configuration TEXT").run(); } catch (e) {}
@@ -835,13 +873,14 @@ app.post("/Users/New", async (c) => {
   return c.json({
     Name: name,
     Id: id,
-    ServerId: "serverless_jellyfin_id_123",
+    ServerId: SERVER_ID,
     HasPassword: !!password,
     HasConfiguredPassword: !!password,
     Policy: userPolicy,
     Configuration: defaultUserConfig,
   });
 });
+app.post("/users/new", async (c) => c.redirect("/Users/New", 307));
 
 app.post("/Users/AuthenticateByName", handleAuth);
 app.post("/Users/authenticatebyname", handleAuth);
@@ -860,18 +899,32 @@ async function handleAuth(c: any) {
   const Username = body.Username || body.username || c.req.query("Username") || c.req.query("username") || "admin";
   const Pw = body.Pw || body.pw || body.Password || body.password || "";
 
-  const { results } = await c.env.DB.prepare(
-    "SELECT * FROM Users WHERE Name = ?",
-  )
-    .bind(Username)
-    .all();
-  if (!results.length) {
+  let user: any = null;
+  try {
+    const { results } = await c.env.DB.prepare(
+      "SELECT * FROM Users WHERE LOWER(Name) = LOWER(?)"
+    )
+      .bind(Username)
+      .all();
+    if (results && results.length) {
+      user = results[0];
+    }
+  } catch (e) {}
+
+  if (!user && (Username.toLowerCase() === "admin" || !Username)) {
+    try {
+      user = await c.env.DB.prepare("SELECT * FROM Users WHERE Name = 'admin' OR Id = ? LIMIT 1").bind(DEFAULT_ADMIN_ID).first();
+    } catch (e) {}
+  }
+
+  if (!user) {
     return c.json({ error: "Invalid username" }, 401);
   }
-  const user: any = results[0];
   if (user.Password && Pw && user.Password !== Pw) {
     return c.json({ error: "Invalid password" }, 401);
   }
+
+  const userId = toValidUuid(user.Id);
 
   let policy = defaultPolicy;
   try { if (user.Policy) policy = { ...defaultPolicy, ...JSON.parse(user.Policy) }; } catch (e) {}
@@ -886,8 +939,8 @@ async function handleAuth(c: any) {
   return c.json({
     User: {
       Name: user.Name,
-      ServerId: "serverless_jellyfin_id_123",
-      Id: user.Id,
+      ServerId: SERVER_ID,
+      Id: userId,
       HasPassword: true,
       HasConfiguredPassword: true,
       HasConfiguredEasyPassword: false,
@@ -913,8 +966,8 @@ async function handleAuth(c: any) {
       },
       RemoteEndPoint: "127.0.0.1",
       PlayableMediaTypes: ["Audio", "Video"],
-      Id: "session_123",
-      UserId: user.Id,
+      Id: DEFAULT_SESSION_ID,
+      UserId: userId,
       UserName: user.Name,
       Client: clientName,
       LastActivityDate: new Date().toISOString(),
@@ -923,73 +976,161 @@ async function handleAuth(c: any) {
       ApplicationVersion: clientVersion,
       IsActive: true,
       SupportsMediaControl: true,
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
     },
     AccessToken: "fake_jwt_token_12345",
-    ServerId: "serverless_jellyfin_id_123",
+    ServerId: SERVER_ID,
   });
 }
 
-app.get("/Users/:userId", async (c) => {
-  const userId = c.req.param("userId");
+const handleCurrentUser = async (c: any) => {
   let user: any = null;
   try {
-    user = await c.env.DB.prepare("SELECT * FROM Users WHERE Id = ?").bind(userId).first();
+    user = await c.env.DB.prepare("SELECT * FROM Users WHERE Id = ? OR Name = 'admin' LIMIT 1").bind(DEFAULT_ADMIN_ID).first();
   } catch (e) {}
 
   let policy = defaultPolicy;
   let config = defaultUserConfig;
-  let name = "admin";
+  let name = user?.Name || "admin";
+  let id = user?.Id ? toValidUuid(user.Id) : DEFAULT_ADMIN_ID;
+
   if (user) {
-    name = user.Name;
     try { if (user.Policy) policy = { ...defaultPolicy, ...JSON.parse(user.Policy) }; } catch (e) {}
     try { if (user.Configuration) config = { ...defaultUserConfig, ...JSON.parse(user.Configuration) }; } catch (e) {}
   }
 
   return c.json({
     Name: name,
-    Id: userId,
-    ServerId: "serverless_jellyfin_id_123",
+    Id: id,
+    ServerId: SERVER_ID,
     HasPassword: true,
     HasConfiguredPassword: true,
     Configuration: config,
     Policy: policy,
   });
-});
+};
+
+app.get("/Users/Me", handleCurrentUser);
+app.get("/users/me", handleCurrentUser);
+app.get("/Users/me", handleCurrentUser);
+app.get("/users/Me", handleCurrentUser);
+
+const handleGetUserById = async (c: any) => {
+  const rawId = c.req.param("userId");
+  if (!rawId || rawId.toLowerCase() === "me") {
+    return handleCurrentUser(c);
+  }
+
+  const validId = toValidUuid(rawId);
+  let user: any = null;
+  try {
+    user = await c.env.DB.prepare("SELECT * FROM Users WHERE Id = ? OR Id = ?").bind(rawId, validId).first();
+  } catch (e) {}
+
+  if (!user && (rawId === DEFAULT_ADMIN_ID || rawId === DEFAULT_ADMIN_ID || rawId.toLowerCase() === "admin")) {
+    try {
+      user = await c.env.DB.prepare("SELECT * FROM Users WHERE Name = 'admin' LIMIT 1").first();
+    } catch (e) {}
+  }
+
+  let policy = defaultPolicy;
+  let config = defaultUserConfig;
+  let name = user?.Name || "admin";
+  const id = user?.Id ? toValidUuid(user.Id) : validId;
+
+  if (user) {
+    try { if (user.Policy) policy = { ...defaultPolicy, ...JSON.parse(user.Policy) }; } catch (e) {}
+    try { if (user.Configuration) config = { ...defaultUserConfig, ...JSON.parse(user.Configuration) }; } catch (e) {}
+  }
+
+  return c.json({
+    Name: name,
+    Id: id,
+    ServerId: SERVER_ID,
+    HasPassword: true,
+    HasConfiguredPassword: true,
+    Configuration: config,
+    Policy: policy,
+  });
+};
+
+app.get("/Users/:userId", handleGetUserById);
+app.get("/users/:userId", handleGetUserById);
 
 app.post("/Users/:userId/Policy", async (c) => {
-  const userId = c.req.param("userId");
+  const rawId = c.req.param("userId");
+  const userId = toValidUuid(rawId);
   const body = await c.req.json().catch(() => ({}));
   try {
-    await c.env.DB.prepare("UPDATE Users SET Policy = ? WHERE Id = ?").bind(JSON.stringify(body), userId).run();
+    await c.env.DB.prepare("UPDATE Users SET Policy = ? WHERE Id = ? OR Id = ?").bind(JSON.stringify(body), rawId, userId).run();
+  } catch (e) {}
+  return c.body(null, 204);
+});
+app.post("/users/:userId/policy", async (c) => {
+  const rawId = c.req.param("userId");
+  const userId = toValidUuid(rawId);
+  const body = await c.req.json().catch(() => ({}));
+  try {
+    await c.env.DB.prepare("UPDATE Users SET Policy = ? WHERE Id = ? OR Id = ?").bind(JSON.stringify(body), rawId, userId).run();
   } catch (e) {}
   return c.body(null, 204);
 });
 
 app.post("/Users/:userId/Configuration", async (c) => {
-  const userId = c.req.param("userId");
+  const rawId = c.req.param("userId");
+  const userId = toValidUuid(rawId);
   const body = await c.req.json().catch(() => ({}));
   try {
-    await c.env.DB.prepare("UPDATE Users SET Configuration = ? WHERE Id = ?").bind(JSON.stringify(body), userId).run();
+    await c.env.DB.prepare("UPDATE Users SET Configuration = ? WHERE Id = ? OR Id = ?").bind(JSON.stringify(body), rawId, userId).run();
+  } catch (e) {}
+  return c.body(null, 204);
+});
+app.post("/users/:userId/configuration", async (c) => {
+  const rawId = c.req.param("userId");
+  const userId = toValidUuid(rawId);
+  const body = await c.req.json().catch(() => ({}));
+  try {
+    await c.env.DB.prepare("UPDATE Users SET Configuration = ? WHERE Id = ? OR Id = ?").bind(JSON.stringify(body), rawId, userId).run();
   } catch (e) {}
   return c.body(null, 204);
 });
 
 app.post("/Users/:userId/Password", async (c) => {
-  const userId = c.req.param("userId");
+  const rawId = c.req.param("userId");
+  const userId = toValidUuid(rawId);
   let body: any = {};
   try { body = await c.req.json(); } catch (e) {}
   const newPw = body.NewPw || body.NewPassword || "";
   if (newPw) {
-    await c.env.DB.prepare("UPDATE Users SET Password = ? WHERE Id = ?").bind(newPw, userId).run();
+    await c.env.DB.prepare("UPDATE Users SET Password = ? WHERE Id = ? OR Id = ?").bind(newPw, rawId, userId).run();
+  }
+  return c.body(null, 204);
+});
+app.post("/users/:userId/password", async (c) => {
+  const rawId = c.req.param("userId");
+  const userId = toValidUuid(rawId);
+  let body: any = {};
+  try { body = await c.req.json(); } catch (e) {}
+  const newPw = body.NewPw || body.NewPassword || "";
+  if (newPw) {
+    await c.env.DB.prepare("UPDATE Users SET Password = ? WHERE Id = ? OR Id = ?").bind(newPw, rawId, userId).run();
   }
   return c.body(null, 204);
 });
 
 app.delete("/Users/:userId", async (c) => {
-  const userId = c.req.param("userId");
-  if (userId !== "user_admin_123") {
-    await c.env.DB.prepare("DELETE FROM Users WHERE Id = ?").bind(userId).run();
+  const rawId = c.req.param("userId");
+  const userId = toValidUuid(rawId);
+  if (userId !== DEFAULT_ADMIN_ID && rawId !== DEFAULT_ADMIN_ID && rawId.toLowerCase() !== "admin") {
+    await c.env.DB.prepare("DELETE FROM Users WHERE Id = ? OR Id = ?").bind(rawId, userId).run();
+  }
+  return c.body(null, 204);
+});
+app.delete("/users/:userId", async (c) => {
+  const rawId = c.req.param("userId");
+  const userId = toValidUuid(rawId);
+  if (userId !== DEFAULT_ADMIN_ID && rawId !== DEFAULT_ADMIN_ID && rawId.toLowerCase() !== "admin") {
+    await c.env.DB.prepare("DELETE FROM Users WHERE Id = ? OR Id = ?").bind(rawId, userId).run();
   }
   return c.body(null, 204);
 });
@@ -1002,13 +1143,12 @@ app.post("/Sessions/Capabilities/Full", (c) => new Response(null, { status: 204 
 app.post("/sessions/capabilities/full", (c) => new Response(null, { status: 204 }));
 app.post("/Sessions/Logout", (c) => new Response(null, { status: 204 }));
 app.post("/sessions/logout", (c) => new Response(null, { status: 204 }));
-app.post("/Sessions/Playing", (c) => new Response(null, { status: 204 }));
-app.post("/Sessions/Playing/Progress", async (c) => {
+const handlePlayingProgress = async (c: any) => {
   try {
     const body = await c.req.json().catch(() => ({}));
     const itemId = body.ItemId || body.itemId || c.req.query("ItemId") || c.req.query("itemId");
     const positionTicks = body.PositionTicks ?? body.positionTicks ?? parseInt(c.req.query("PositionTicks") || c.req.query("positionTicks") || "0");
-    const userId = body.UserId || body.userId || c.req.query("UserId") || "user_admin_123";
+    const userId = toValidUuid(body.UserId || body.userId || c.req.query("UserId") || c.req.query("userId"));
     if (itemId && positionTicks > 0) {
       await c.env.DB.prepare(
         "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
@@ -1016,13 +1156,14 @@ app.post("/Sessions/Playing/Progress", async (c) => {
     }
   } catch (e) {}
   return new Response(null, { status: 204 });
-});
-app.post("/Sessions/Playing/Stopped", async (c) => {
+};
+
+const handlePlayingStopped = async (c: any) => {
   try {
     const body = await c.req.json().catch(() => ({}));
     const itemId = body.ItemId || body.itemId || c.req.query("ItemId") || c.req.query("itemId");
     const positionTicks = body.PositionTicks ?? body.positionTicks ?? parseInt(c.req.query("PositionTicks") || c.req.query("positionTicks") || "0");
-    const userId = body.UserId || body.userId || c.req.query("UserId") || "user_admin_123";
+    const userId = toValidUuid(body.UserId || body.userId || c.req.query("UserId") || c.req.query("userId"));
     let played = 0;
     if (itemId) {
       const item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
@@ -1039,12 +1180,21 @@ app.post("/Sessions/Playing/Stopped", async (c) => {
     }
   } catch (e) {}
   return new Response(null, { status: 204 });
-});
+};
+
+app.post("/Sessions/Playing", (c) => new Response(null, { status: 204 }));
+app.post("/sessions/playing", (c) => new Response(null, { status: 204 }));
+app.post("/Sessions/Playing/Progress", handlePlayingProgress);
+app.post("/sessions/playing/progress", handlePlayingProgress);
+app.post("/Sessions/Playing/Stopped", handlePlayingStopped);
+app.post("/sessions/playing/stopped", handlePlayingStopped);
+
 
 app.post("/Users/:userId/PlayingItems/:itemId", (c) => new Response(null, { status: 204 }));
+app.post("/users/:userId/playingitems/:itemId", (c) => new Response(null, { status: 204 }));
 app.post("/Users/:userId/PlayingItems/:itemId/Progress", async (c) => {
   try {
-    const userId = c.req.param("userId") || "user_admin_123";
+    const userId = toValidUuid(c.req.param("userId"));
     const itemId = c.req.param("itemId");
     const pos = parseInt(c.req.query("positionTicks") || c.req.query("PositionTicks") || "0");
     if (itemId && pos > 0) {
@@ -1056,9 +1206,10 @@ app.post("/Users/:userId/PlayingItems/:itemId/Progress", async (c) => {
   return new Response(null, { status: 204 });
 });
 app.delete("/Users/:userId/PlayingItems/:itemId", (c) => new Response(null, { status: 204 }));
+app.delete("/users/:userId/playingitems/:itemId", (c) => new Response(null, { status: 204 }));
 
 app.post("/Users/:userId/PlayedItems/:itemId", async (c) => {
-  const userId = c.req.param("userId") || "user_admin_123";
+  const userId = toValidUuid(c.req.param("userId"));
   const itemId = c.req.param("itemId");
   try {
     await c.env.DB.prepare(
@@ -1077,7 +1228,7 @@ app.post("/Users/:userId/PlayedItems/:itemId", async (c) => {
 });
 
 app.delete("/Users/:userId/PlayedItems/:itemId", async (c) => {
-  const userId = c.req.param("userId") || "user_admin_123";
+  const userId = toValidUuid(c.req.param("userId"));
   const itemId = c.req.param("itemId");
   try {
     await c.env.DB.prepare(
@@ -1096,7 +1247,7 @@ app.delete("/Users/:userId/PlayedItems/:itemId", async (c) => {
 });
 
 app.post("/Users/:userId/FavoriteItems/:itemId", async (c) => {
-  const userId = c.req.param("userId") || "user_admin_123";
+  const userId = toValidUuid(c.req.param("userId"));
   const itemId = c.req.param("itemId");
   try {
     await c.env.DB.prepare(
@@ -1114,7 +1265,7 @@ app.post("/Users/:userId/FavoriteItems/:itemId", async (c) => {
 });
 
 app.delete("/Users/:userId/FavoriteItems/:itemId", async (c) => {
-  const userId = c.req.param("userId") || "user_admin_123";
+  const userId = toValidUuid(c.req.param("userId"));
   const itemId = c.req.param("itemId");
   try {
     await c.env.DB.prepare(
@@ -1165,9 +1316,10 @@ app.get("/QuickConnect/Status", (c) => c.json({ Authenticated: false }));
 app.get("/quickconnect/status", (c) => c.json({ Authenticated: false }));
 
 app.get("/Playback/BitrateTest", (c) => c.text("ok"));
+app.get("/playback/bitratetest", (c) => c.text("ok"));
 
 // 3. Views (Bibliotecas: Series-Dub, etc)
-app.get("/Library/VirtualFolders", async (c) => {
+const handleVirtualFolders = async (c: any) => {
   const { results } = await c.env.DB.prepare("SELECT * FROM Libraries").all();
   return c.json(
     results.map((row: any) => ({
@@ -1176,13 +1328,16 @@ app.get("/Library/VirtualFolders", async (c) => {
       CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
       ItemId: row.Id,
       PrimaryImageItemId: row.Id,
+      PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
       RefreshProgress: 0,
       RefreshStatus: "Idle",
-      ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) },
-      BackdropImageTags: row.PrimaryImageFileId ? [getImageTag(row.PrimaryImageFileId)] : undefined,
+      ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
+      BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
     }))
   );
-});
+};
+app.get("/Library/VirtualFolders", handleVirtualFolders);
+app.get("/library/virtualfolders", handleVirtualFolders);
 
 app.post("/Library/VirtualFolders", async (c) => {
   let body: any = {};
@@ -1515,11 +1670,12 @@ app.get("/Backup/:fileId", async (c) => {
 
 
 // 3.1. Views (Bibliotecas: Series-Dub, etc)
-app.get("/Users/:userId/Views", async (c) => {
-  const userId = c.req.param("userId");
+const handleUserViews = async (c: any) => {
+  const rawUserId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId");
+  const userId = toValidUuid(rawUserId);
   let enabledFolders: string[] | null = null;
   try {
-    const user: any = await c.env.DB.prepare("SELECT Policy FROM Users WHERE Id = ?").bind(userId).first();
+    const user: any = await c.env.DB.prepare("SELECT Policy FROM Users WHERE Id = ? OR Id = ?").bind(rawUserId, userId).first();
     if (user && user.Policy) {
       const pol = JSON.parse(user.Policy);
       if (pol.EnableAllFolders === false && Array.isArray(pol.EnabledFolders)) {
@@ -1534,24 +1690,31 @@ app.get("/Users/:userId/Views", async (c) => {
   }
   const items = results.map((row: any) => ({
     Name: row.Name,
-    ServerId: "serverless_jellyfin_id_123",
+    ServerId: SERVER_ID,
     Id: row.Id,
     IsFolder: true,
     Type: "CollectionFolder",
     CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
-    ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) },
+    ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
+    PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
     PrimaryImageItemId: row.Id,
-    BackdropImageTags: row.PrimaryImageFileId ? [getImageTag(row.PrimaryImageFileId)] : undefined,
+    BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
   }));
   return c.json({ Items: items, TotalRecordCount: items.length });
-});
+};
 
-app.get("/UserViews", async (c) => {
-  const userId = c.req.query("userId");
+app.get("/Users/:userId/Views", handleUserViews);
+app.get("/users/:userId/views", handleUserViews);
+app.get("/Users/:userId/views", handleUserViews);
+app.get("/users/:userId/Views", handleUserViews);
+
+const handleUserViewsGeneral = async (c: any) => {
+  const rawUserId = c.req.query("userId") || c.req.query("UserId");
+  const userId = rawUserId ? toValidUuid(rawUserId) : null;
   let enabledFolders: string[] | null = null;
   if (userId) {
     try {
-      const user: any = await c.env.DB.prepare("SELECT Policy FROM Users WHERE Id = ?").bind(userId).first();
+      const user: any = await c.env.DB.prepare("SELECT Policy FROM Users WHERE Id = ? OR Id = ?").bind(rawUserId, userId).first();
       if (user && user.Policy) {
         const pol = JSON.parse(user.Policy);
         if (pol.EnableAllFolders === false && Array.isArray(pol.EnabledFolders)) {
@@ -1567,17 +1730,22 @@ app.get("/UserViews", async (c) => {
   }
   const items = results.map((row: any) => ({
     Name: row.Name,
-    ServerId: "serverless_jellyfin_id_123",
+    ServerId: SERVER_ID,
     Id: row.Id,
     IsFolder: true,
     Type: "CollectionFolder",
     CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
-    ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) },
+    ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
+    PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
     PrimaryImageItemId: row.Id,
-    BackdropImageTags: row.PrimaryImageFileId ? [getImageTag(row.PrimaryImageFileId)] : undefined,
+    BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
   }));
   return c.json({ Items: items, TotalRecordCount: items.length });
-});
+};
+
+app.get("/UserViews", handleUserViewsGeneral);
+app.get("/userviews", handleUserViewsGeneral);
+app.get("/userViews", handleUserViewsGeneral);
 
 app.get("/SyncPlay/List", (c) => c.json([]));
 
@@ -1849,7 +2017,7 @@ const parseMediaInfo = (row: any) => {
 // Home Screen & Latest & Search Handlers
 const handleResume = async (c: any) => {
   try {
-    const userId = c.req.param("userId") || c.req.query("userId") || "user_admin_123";
+    const userId = c.req.param("userId") || c.req.query("userId") || DEFAULT_ADMIN_ID;
     const mediaTypes = c.req.query("mediaTypes") || c.req.query("MediaTypes");
     let typeFilter = "AND i.Type IN ('Movie', 'Episode')";
     if (mediaTypes) {
@@ -1915,7 +2083,7 @@ const handleResume = async (c: any) => {
 
       return {
         Name: epName,
-        ServerId: "serverless_jellyfin_id_123",
+        ServerId: SERVER_ID,
         Id: row.Id,
         Container: container,
         IsFolder: false,
@@ -1933,8 +2101,8 @@ const handleResume = async (c: any) => {
         IsPlayable: true,
         PlayAccess: "Full",
         Overview: epOverview,
-        PrimaryImageTag: hasAnyImage ? "cached" : undefined,
-        ImageTags: hasAnyImage ? { Primary: "cached" } : {},
+        PrimaryImageTag: "cached",
+        ImageTags: { Primary: "cached" },
         SeriesPrimaryImageTag: sPoster ? "cached" : undefined,
         ParentPrimaryImageItemId: sId,
         ParentPrimaryImageTag: sPoster ? "cached" : undefined,
@@ -1950,10 +2118,12 @@ const handleResume = async (c: any) => {
   }
 };
 app.get("/UserItems/Resume", handleResume);
+app.get("/useritems/resume", handleResume);
 app.get("/Users/:userId/Items/Resume", handleResume);
+app.get("/users/:userId/items/resume", handleResume);
 
 const handleLatestItems = async (c: any) => {
-  const userId = c.req.param("userId") || c.req.query("userId") || "user_admin_123";
+  const userId = c.req.param("userId") || c.req.query("userId") || DEFAULT_ADMIN_ID;
   const parentId = c.req.query("parentId") || c.req.query("ParentId");
   const limit = parseInt(c.req.query("limit") || c.req.query("Limit") || "16");
   const types = getQueryArray(c, "includeItemTypes");
@@ -1996,7 +2166,7 @@ const handleLatestItems = async (c: any) => {
 
     return {
       Name: row.Name,
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
       Id: row.Id,
       Container: container,
       IsFolder: isSeries,
@@ -2014,8 +2184,9 @@ const handleLatestItems = async (c: any) => {
       AlbumId: isAudio ? "album_view_musicas" : undefined,
       AlbumArtist: isAudio ? "Vários Artistas" : undefined,
       AlbumArtists: isAudio ? [{ Name: "Vários Artistas", Id: "artist_varios" }] : undefined,
-      ImageTags: { Primary: row.PrimaryImageFileId ? "cached" : "poster" },
-      BackdropImageTags: [row.BackdropImageFileId ? "cached" : "backdrop"],
+      PrimaryImageTag: "cached",
+      ImageTags: { Primary: "cached" },
+      BackdropImageTags: ["cached"],
       UserData: userData,
     };
   });
@@ -2024,7 +2195,9 @@ const handleLatestItems = async (c: any) => {
 };
 
 app.get("/Items/Latest", handleLatestItems);
+app.get("/items/latest", handleLatestItems);
 app.get("/Users/:userId/Items/Latest", handleLatestItems);
+app.get("/users/:userId/items/latest", handleLatestItems);
 
 function getSearchPatterns(word: string): string[] {
   const s = new Set<string>();
@@ -2113,7 +2286,7 @@ app.get("/Search/Hints", async (c) => {
 
 // Helper to get Item by Id from DB
 const getItemById = async (c: any, itemId: string) => {
-  const userId = c.req.param("userId") || c.req.query("userId") || "user_admin_123";
+  const userId = c.req.param("userId") || c.req.query("userId") || DEFAULT_ADMIN_ID;
   if (itemId.startsWith("view_")) {
     const { results } = await c.env.DB.prepare("SELECT * FROM Libraries WHERE Id = ?").bind(itemId).all();
     if (results.length) {
@@ -2121,7 +2294,7 @@ const getItemById = async (c: any, itemId: string) => {
       const hasImage = !!lib.PrimaryImageFileId;
       return {
         Name: lib.Name,
-        ServerId: "serverless_jellyfin_id_123",
+        ServerId: SERVER_ID,
         Id: lib.Id,
         IsFolder: true,
         Type: "CollectionFolder",
@@ -2139,7 +2312,7 @@ const getItemById = async (c: any, itemId: string) => {
     const childCount = countRes?.c || 1;
     return {
       Name: "Músicas",
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
       Id: itemId,
       IsFolder: true,
       Type: "MusicAlbum",
@@ -2179,6 +2352,9 @@ const getItemById = async (c: any, itemId: string) => {
 
   const parsed = parseMediaInfo(row);
   const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
+  const url = new URL(c.req.url);
+  const origin = `${url.protocol}//${url.host}`;
+  const streamUrl = isAudio ? `${origin}/Audio/${row.Id}/universal` : `${origin}/Videos/${row.Id}/stream.${container}`;
 
   let childCount: number | undefined = undefined;
   let recursiveCount: number | undefined = undefined;
@@ -2258,8 +2434,6 @@ const getItemById = async (c: any, itemId: string) => {
   const studios = tmdbDet?.studios || [];
   const tagline = tmdbDet?.tagline || "";
 
-  const streamUrl = isAudio ? `/Audio/${row.Id}/universal` : `/Videos/${row.Id}/stream.${container}`;
-
   const parentId = isSeason 
     ? seriesId 
     : (row.Type === "Episode" ? (seasonId || row.ParentId) : row.LibraryId);
@@ -2275,7 +2449,7 @@ const getItemById = async (c: any, itemId: string) => {
 
   return {
     Name: cleanName,
-    ServerId: "serverless_jellyfin_id_123",
+    ServerId: SERVER_ID,
     Id: row.Id,
     ParentId: parentId,
     IsFolder: isSeries || isSeason,
@@ -2327,7 +2501,7 @@ const getItemById = async (c: any, itemId: string) => {
     MediaSources: (isVideo || isAudio)
       ? [
           {
-            Protocol: "File",
+            Protocol: "Http",
             Id: row.Id,
             Path: streamUrl,
             DirectStreamUrl: streamUrl,
@@ -2336,7 +2510,7 @@ const getItemById = async (c: any, itemId: string) => {
             Container: container,
             Size: row.Size || 100000000,
             Name: row.Name,
-            IsRemote: false,
+            IsRemote: true,
             RunTimeTicks: parsed.RunTimeTicks,
             SupportsTranscoding: false,
             SupportsDirectStream: true,
@@ -2359,6 +2533,16 @@ const getItemById = async (c: any, itemId: string) => {
   };
 };
 
+app.get("/users/:userId/items/:itemId", async (c) => {
+  const item = await getItemById(c, c.req.param("itemId"));
+  if (item) return c.json(item);
+  return c.notFound();
+});
+app.get("/items/:itemId", async (c) => {
+  const item = await getItemById(c, c.req.param("itemId"));
+  if (item) return c.json(item);
+  return c.notFound();
+});
 app.get("/Users/:userId/Items/:itemId", async (c) => {
   const item = await getItemById(c, c.req.param("itemId"));
   if (item) return c.json(item);
@@ -2375,7 +2559,7 @@ async function serveImageOrProxy(c: any, fileId: string | null | undefined, fall
   const fallbackDims = isBackdrop ? "1280x720" : "400x600";
   if (!fileId) {
     const text = encodeURIComponent(fallbackText || "Image");
-    return c.redirect(`https://placehold.co/${fallbackDims}/141414/e50914?text=${text}`, 302);
+    return c.redirect(`https://placehold.co/${fallbackDims}/141414/e50914.png?text=${text}`, 302);
   }
 
   // 1. Data URL (Base64)
@@ -2433,7 +2617,7 @@ async function serveImageOrProxy(c: any, fileId: string | null | undefined, fall
   }
 
   const text = encodeURIComponent(fallbackText || "Image");
-  return c.redirect(`https://placehold.co/${fallbackDims}/141414/e50914?text=${text}`, 302);
+  return c.redirect(`https://placehold.co/${fallbackDims}/141414/e50914.png?text=${text}`, 302);
 }
 
 const imageHandler = async (c: any) => {
@@ -2556,8 +2740,18 @@ const imageHandler = async (c: any) => {
 
 app.get("/Items/:itemId/Images/:imageType", imageHandler);
 app.get("/Items/:itemId/Images/:imageType/:index", imageHandler);
+app.get("/items/:itemId/images/:imageType", imageHandler);
+app.get("/items/:itemId/images/:imageType/:index", imageHandler);
+app.get("/Items/:itemId/images/:imageType", imageHandler);
+app.get("/Items/:itemId/images/:imageType/:index", imageHandler);
+app.get("/items/:itemId/Images/:imageType", imageHandler);
+app.get("/items/:itemId/Images/:imageType/:index", imageHandler);
+app.get("/Users/:userId/Items/:itemId/Images/:imageType", imageHandler);
+app.get("/Users/:userId/Items/:itemId/Images/:imageType/:index", imageHandler);
+app.get("/users/:userId/items/:itemId/images/:imageType", imageHandler);
+app.get("/users/:userId/items/:itemId/images/:imageType/:index", imageHandler);
 
-app.get("/Items/:itemId/Images", async (c) => {
+const handleImageList = async (c: any) => {
   const itemId = c.req.param("itemId");
   if (itemId.startsWith("view_")) {
     const lib: any = await c.env.DB.prepare("SELECT * FROM Libraries WHERE Id = ?").bind(itemId).first();
@@ -2590,19 +2784,13 @@ app.get("/Items/:itemId/Images", async (c) => {
       Size: 100000,
     });
   }
-  if (item.BackdropImageFileId) {
-    images.push({
-      ImageType: "Backdrop",
-      ImageIndex: 0,
-      ImageTag: "cached",
-      Path: item.BackdropImageFileId,
-      Height: 720,
-      Width: 1280,
-      Size: 200000,
-    });
-  }
   return c.json(images);
-});
+};
+app.get("/Items/:itemId/Images", handleImageList);
+app.get("/items/:itemId/images", handleImageList);
+app.get("/Users/:userId/Items/:itemId/Images", handleImageList);
+app.get("/users/:userId/items/:itemId/images", handleImageList);
+
 
 app.get("/Items/:itemId/RemoteImages/Providers", async (c) => {
   return c.json([
@@ -2702,7 +2890,7 @@ app.post("/Items/:itemId/RemoteImages/Download", async (c) => {
 });
 
 const itemsHandler = async (c: any) => {
-  const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || "user_admin_123";
+  const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || DEFAULT_ADMIN_ID;
   const parentId = c.req.query("parentId") || c.req.query("ParentId");
   const ids = c.req.query("ids") || c.req.query("Ids");
   const includeItemTypes = getQueryArray(c, "includeItemTypes");
@@ -2826,7 +3014,7 @@ const itemsHandler = async (c: any) => {
     if (audioRes && audioRes.c > 0) {
       const album = {
         Name: "Músicas",
-        ServerId: "serverless_jellyfin_id_123",
+        ServerId: SERVER_ID,
         Id: `album_${parentId || 'default'}`,
         Type: "MusicAlbum",
         IsFolder: true,
@@ -2875,7 +3063,7 @@ const itemsHandler = async (c: any) => {
 
     return {
       Name: cleanName,
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
       Id: row.Id,
       HasSubtitles: parsed.MediaStreams.some((s: any) => s.Type === "Subtitle"),
       Container: container,
@@ -2889,11 +3077,11 @@ const itemsHandler = async (c: any) => {
       IsFolder: row.Type === "Series" || row.Type === "Season",
       Type: row.Type,
       UserData: userData,
-      PrimaryImageTag: hasImage ? "cached" : undefined,
+      PrimaryImageTag: "cached",
       ImageTags: {
-        Primary: row.PrimaryImageFileId ? "cached" : (hasImage ? "cached" : undefined),
+        Primary: "cached",
       },
-      BackdropImageTags: row.BackdropImageFileId ? ["cached"] : [],
+      BackdropImageTags: ["cached"],
       LocationType: "FileSystem",
       MediaType: isVideo ? "Video" : (isAudio ? "Audio" : "Unknown"),
       RunTimeTicks: parsed.RunTimeTicks,
@@ -2916,8 +3104,55 @@ const itemsHandler = async (c: any) => {
 };
 
 app.get("/Items", itemsHandler);
+app.get("/items", itemsHandler);
 app.get("/Users/:userId/Items", itemsHandler);
+app.get("/users/:userId/items", itemsHandler);
 
+app.get("/shows/:itemId/seasons", async (c) => {
+  const itemId = c.req.param("itemId");
+  let item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
+  let seriesId = itemId;
+  let series: any = item;
+  if (item && item.Type === "Season") {
+    seriesId = item.ParentId;
+    series = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(seriesId).first();
+  }
+  const seriesName = series ? series.Name : "Series";
+  const { results } = await c.env.DB.prepare(
+    "SELECT * FROM Items WHERE ParentId = ? AND Type = 'Season' ORDER BY IndexNumber ASC"
+  ).bind(seriesId).all();
+  const items = results.map((row: any) => ({
+    Name: row.Name,
+    ServerId: SERVER_ID,
+    Id: row.Id,
+    Type: "Season",
+    IsFolder: true,
+    IndexNumber: row.IndexNumber || 1,
+    SeriesName: seriesName,
+    SeriesId: seriesId,
+    ParentId: seriesId,
+    ParentBackdropItemId: seriesId,
+    ParentBackdropImageTags: series?.BackdropImageFileId ? ["cached"] : ["backdrop"],
+    ParentPrimaryImageItemId: seriesId,
+    ParentPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : "poster",
+    SeriesPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : "poster",
+    ImageTags: { Primary: row.PrimaryImageFileId ? "cached" : (series?.PrimaryImageFileId ? "cached" : "poster") },
+    BackdropImageTags: row.BackdropImageFileId ? ["cached"] : (series?.BackdropImageFileId ? ["cached"] : ["backdrop"]),
+    LocationType: "FileSystem",
+    MediaType: "Unknown",
+    UserData: {
+      PlayedPercentage: 0,
+      UnplayedItemCount: 10,
+      PlaybackPositionTicks: 0,
+      PlayCount: 0,
+      IsFavorite: false,
+      Played: false,
+      Key: row.Id,
+      ItemId: row.Id,
+    },
+  }));
+  return c.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 });
+});
 app.get("/Shows/:itemId/Seasons", async (c) => {
   const itemId = c.req.param("itemId");
   let item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
@@ -2938,7 +3173,7 @@ app.get("/Shows/:itemId/Seasons", async (c) => {
   const items = results.map((row: any) => {
     return {
       Name: row.Name,
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
       Id: row.Id,
       Type: "Season",
       IsFolder: true,
@@ -2971,7 +3206,7 @@ app.get("/Shows/:itemId/Seasons", async (c) => {
 });
 
 app.get("/Shows/:itemId/Episodes", async (c) => {
-  const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || "user_admin_123";
+  const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || DEFAULT_ADMIN_ID;
   const itemId = c.req.param("itemId"); // series id or season id
   const seasonId = c.req.query("seasonId") || c.req.query("SeasonId");
 
@@ -3024,7 +3259,9 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
     const parsed = parseMediaInfo(row);
     const isAudio = row.Type === "Audio";
     const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
-    const streamUrl = isAudio ? `/Audio/${row.Id}/universal` : `/Videos/${row.Id}/stream.${container}`;
+    const url = new URL(c.req.url);
+    const origin = `${url.protocol}//${url.host}`;
+    const streamUrl = isAudio ? `${origin}/Audio/${row.Id}/universal` : `${origin}/Videos/${row.Id}/stream.${container}`;
 
     let epName = cleanEpisodeTitle(row.Name, row.IndexNumber);
     let epOverview = row.Overview || "";
@@ -3051,7 +3288,7 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
 
     return {
       Name: epName,
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
       Id: row.Id,
       ParentId: row.ParentId,
       SeriesId: seriesId,
@@ -3068,8 +3305,8 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
       RunTimeTicks: parsed.RunTimeTicks,
       HasSubtitles: parsed.MediaStreams.some((s: any) => s.Type === "Subtitle"),
       Overview: epOverview,
-      PrimaryImageTag: hasAnyImage ? "cached" : undefined,
-      ImageTags: hasAnyImage ? { Primary: "cached" } : {},
+      PrimaryImageTag: "cached",
+      ImageTags: { Primary: "cached" },
       ParentPrimaryImageItemId: seriesId,
       ParentPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : undefined,
       SeriesPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : undefined,
@@ -3087,7 +3324,7 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
       AlbumArtists: isAudio ? [{ Name: "Vários Artistas", Id: "artist_varios" }] : undefined,
       MediaSources: [
         {
-          Protocol: "File",
+          Protocol: "Http",
           Id: row.Id,
           Path: streamUrl,
           DirectStreamUrl: streamUrl,
@@ -3096,7 +3333,7 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
           Container: container,
           Size: row.Size || 100000000,
           Name: row.Name,
-          IsRemote: false,
+          IsRemote: true,
           RunTimeTicks: parsed.RunTimeTicks,
           SupportsTranscoding: false,
           SupportsDirectStream: true,
@@ -3135,7 +3372,7 @@ app.get("/Studios", async (c) => {
     Name: s.Name,
     Id: s.Id,
     Type: "Studio",
-    ServerId: "serverless_jellyfin_id_123"
+    ServerId: SERVER_ID
   }));
   if (searchTerm.trim()) {
     items = items.filter(s => s.Name.toLowerCase().includes(searchTerm.trim().toLowerCase()));
@@ -3162,7 +3399,7 @@ app.get("/Genres", async (c) => {
     Name: g,
     Id: `genre_${i}_${encodeURIComponent(g)}`,
     Type: "Genre",
-    ServerId: "serverless_jellyfin_id_123"
+    ServerId: SERVER_ID
   }));
   if (searchTerm.trim()) {
     items = items.filter(g => g.Name.toLowerCase().includes(searchTerm.trim().toLowerCase()));
@@ -3179,7 +3416,7 @@ app.get("/Artists", async (c) => {
   const artists = [
     {
       Name: "Vários Artistas",
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
       Id: "artist_various",
       Type: "MusicArtist",
       IsFolder: true,
@@ -3200,7 +3437,7 @@ app.get("/Artists/AlbumArtists", async (c) => {
   const artists = [
     {
       Name: "Vários Artistas",
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
       Id: "artist_various",
       Type: "MusicArtist",
       IsFolder: true,
@@ -3237,7 +3474,7 @@ app.get("/Persons", async (c) => {
     Name: p.Name,
     Id: p.Id,
     Type: "Person",
-    ServerId: "serverless_jellyfin_id_123",
+    ServerId: SERVER_ID,
     Role: p.Role,
     PrimaryImageTag: p.PrimaryImageTag ? "cached" : undefined,
   }));
@@ -3253,7 +3490,7 @@ app.get("/Persons/:name", async (c) => {
     Name: name,
     Id: `person_${encodeURIComponent(name)}`,
     Type: "Person",
-    ServerId: "serverless_jellyfin_id_123",
+    ServerId: SERVER_ID,
   });
 });
 
@@ -3402,7 +3639,7 @@ app.post("/Items/RemoteSearch/Apply/:itemId", async (c) => {
 
 // Shows NextUp endpoint
 app.get("/Shows/NextUp", async (c) => {
-  const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || "user_admin_123";
+  const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || DEFAULT_ADMIN_ID;
   const seriesId = c.req.query("seriesId") || c.req.query("SeriesId");
   let series: any = null;
   let tmdbSeasonEpMap: Map<number, any> | null = null;
@@ -3475,7 +3712,7 @@ app.get("/Shows/NextUp", async (c) => {
 
     return {
       Name: epName,
-      ServerId: "serverless_jellyfin_id_123",
+      ServerId: SERVER_ID,
       Id: row.Id,
       Type: "Episode",
       SeriesId: sId,
@@ -3488,8 +3725,8 @@ app.get("/Shows/NextUp", async (c) => {
       RunTimeTicks: parsed.RunTimeTicks,
       HasSubtitles: parsed.MediaStreams.some((s: any) => s.Type === "Subtitle"),
       Overview: epOverview,
-      PrimaryImageTag: hasAnyImage ? "cached" : undefined,
-      ImageTags: hasAnyImage ? { Primary: "cached" } : {},
+      PrimaryImageTag: "cached",
+      ImageTags: { Primary: "cached" },
       SeriesPrimaryImageTag: sPoster ? "cached" : undefined,
       ParentPrimaryImageItemId: sId,
       ParentPrimaryImageTag: sPoster ? "cached" : undefined,
@@ -3507,7 +3744,13 @@ app.get("/LiveTv/*", (c) => c.json({ Items: [], TotalRecordCount: 0, StartIndex:
 
 const handlePlaybackInfo = async (c: any) => {
   const itemId = c.req.param("itemId");
-  const mediaSourceId = c.req.query("mediaSourceId") || c.req.query("MediaSourceId");
+  let body: any = {};
+  if (c.req.method === "POST") {
+    try {
+      body = await c.req.json();
+    } catch (e) {}
+  }
+  const mediaSourceId = c.req.query("mediaSourceId") || c.req.query("MediaSourceId") || body.MediaSourceId || body.Id;
   const targetId = itemId || mediaSourceId;
 
   let row = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(targetId).first();
@@ -3520,22 +3763,26 @@ const handlePlaybackInfo = async (c: any) => {
   const isAudio = row.Type === "Audio";
   const parsed = parseMediaInfo(row);
   const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
-  const streamUrl = isAudio ? `/Audio/${row.Id}/universal` : `/Videos/${row.Id}/stream.${container}`;
+  
+  const url = new URL(c.req.url);
+  const origin = `${url.protocol}//${url.host}`;
+  const streamPath = isAudio ? `/Audio/${row.Id}/universal` : `/Videos/${row.Id}/stream.${container}`;
+  const fullStreamUrl = `${origin}${streamPath}`;
 
   return c.json({
-    PlaySessionId: "playsession_" + row.Id,
+    PlaySessionId: toValidUuid("playsession_" + row.Id),
     MediaSources: [
       {
-        Protocol: "File",
+        Protocol: "Http",
         Id: row.Id,
-        Path: streamUrl,
-        DirectStreamUrl: streamUrl,
-        TranscodingUrl: streamUrl,
+        Path: fullStreamUrl,
+        DirectStreamUrl: fullStreamUrl,
+        TranscodingUrl: fullStreamUrl,
         Type: "Default",
         Container: container,
         Size: row.Size || 100000000,
         Name: row.Name,
-        IsRemote: false,
+        IsRemote: true,
         RunTimeTicks: parsed.RunTimeTicks,
         SupportsTranscoding: false,
         SupportsDirectStream: true,
@@ -3558,6 +3805,12 @@ const handlePlaybackInfo = async (c: any) => {
 
 app.get("/Items/:itemId/PlaybackInfo", handlePlaybackInfo);
 app.post("/Items/:itemId/PlaybackInfo", handlePlaybackInfo);
+app.get("/items/:itemId/playbackinfo", handlePlaybackInfo);
+app.post("/items/:itemId/playbackinfo", handlePlaybackInfo);
+app.get("/Users/:userId/Items/:itemId/PlaybackInfo", handlePlaybackInfo);
+app.post("/Users/:userId/Items/:itemId/PlaybackInfo", handlePlaybackInfo);
+app.get("/users/:userId/items/:itemId/playbackinfo", handlePlaybackInfo);
+app.post("/users/:userId/items/:itemId/playbackinfo", handlePlaybackInfo);
 
 const streamHandler = async (c: any) => {
   try {
