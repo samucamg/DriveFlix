@@ -202,6 +202,29 @@ def paste_center(canvas: Image.Image, im: Image.Image, cx: int, cy: int) -> None
     canvas.alpha_composite(im, (int(round(cx - im.width / 2)), int(round(cy - im.height / 2))))
 
 
+def clean_transparency(im: Image.Image) -> Image.Image:
+    """
+    Zera o RGB dos pixels totalmente transparentes.
+
+    O LANCZOS deixa sobras de cor em pixels com alfa 0. Eles nao aparecem em
+    navegadores modernos, mas alguns WebViews antigos (Android/Android TV)
+    tratam PNG sem alfa pre-multiplicado e desenham essas sobras como franja.
+    Zerar o RGB tambem melhora a compressao do PNG.
+    """
+    r, g, b, a = im.split()
+    transparent = a.point(lambda v: 255 if v == 0 else 0)
+    black = Image.new("L", im.size, 0)
+    return Image.merge(
+        "RGBA",
+        (
+            Image.composite(black, r, transparent),
+            Image.composite(black, g, transparent),
+            Image.composite(black, b, transparent),
+            a,
+        ),
+    )
+
+
 def colorize(im: Image.Image, color: str) -> Image.Image:
     """Mantem o formato/alfa e troca apenas a cor (para a assinatura clara)."""
     solid = Image.new("RGBA", im.size, color)
@@ -228,7 +251,7 @@ def render_icon(mark: Image.Image, size: int, fill: float, background: str | Non
         bg = Image.new("RGBA", (size, size), background)
         bg.alpha_composite(out)
         out = bg
-    return out
+    return clean_transparency(out)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +294,7 @@ def render_banner(mark: Image.Image, text: Image.Image, size=BANNER_SIZE, text_c
         text_r,
         (int(round(x + mark_w + gap)), int(round((big_h - text_r.height) / 2))),
     )
-    return canvas.resize((W, H), Image.Resampling.LANCZOS)
+    return clean_transparency(canvas.resize((W, H), Image.Resampling.LANCZOS))
 
 
 # ---------------------------------------------------------------------------
