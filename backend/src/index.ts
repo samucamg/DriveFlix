@@ -2840,9 +2840,18 @@ const getItemById = async (c: any, itemId: string) => {
   const overview = row.Overview || tmdbDet?.overview || "Sinopse do item gerada pelo servidor.";
   const communityRating = tmdbDet?.voteAverage || (isVideo || isSeries ? 7.0 : undefined);
   const genres = tmdbDet?.genres || [];
-  const genreItems = genres.map((g: string, i: number) => ({ Name: g, Id: `genre_${i}` }));
-  const people = tmdbDet?.people || [];
-  const studios = tmdbDet?.studios || [];
+  const genreItems = genres.map((g: string) => ({ Name: g, Id: toValidUuid("genre_" + g) }));
+  const people = (tmdbDet?.people || []).map((p: any) => ({
+    Name: p.Name,
+    Id: toValidUuid(p.Id || p.Name),
+    Role: p.Role,
+    Type: p.Type,
+    PrimaryImageTag: p.PrimaryImageTag ? (getImageTag(p.PrimaryImageTag) || "cached") : undefined,
+  }));
+  const studios = (tmdbDet?.studios || []).map((s: any) => ({
+    Name: s.Name,
+    Id: toValidUuid(s.Id || s.Name),
+  }));
   const tagline = tmdbDet?.tagline || "";
 
   const parentId = isSeason 
@@ -2871,8 +2880,8 @@ const getItemById = async (c: any, itemId: string) => {
     LocationType: "FileSystem",
     PlayAccess: "Full",
     IsPlayable: isVideo || isAudio,
-    IndexNumber: row.IndexNumber,
-    ParentIndexNumber: row.ParentIndexNumber,
+    IndexNumber: row.IndexNumber != null ? row.IndexNumber : undefined,
+    ParentIndexNumber: row.ParentIndexNumber != null ? row.ParentIndexNumber : undefined,
     RunTimeTicks: parsed.RunTimeTicks,
     ProductionYear: productionYear,
     PremiereDate: premiereDate,
@@ -2894,7 +2903,7 @@ const getItemById = async (c: any, itemId: string) => {
     PrimaryImageTag: row.PrimaryImageFileId ? "cached" : "poster",
     ImageTags: { Primary: row.PrimaryImageFileId ? "cached" : "poster" },
     BackdropImageTags: [row.BackdropImageFileId ? "cached" : "backdrop"],
-    Path: row.FileId,
+    Path: row.FileId ? `/media/${row.Name}` : undefined,
     Overview: overview,
     Taglines: tagline ? [tagline] : [],
     People: people,
@@ -2916,7 +2925,7 @@ const getItemById = async (c: any, itemId: string) => {
     DateCreated: row.DateCreated ? `${String(row.DateCreated).replace(" ", "T")}.0000000Z` : "2024-01-01T00:00:00.0000000Z",
     SortName: (cleanMediaTitle(cleanName).query || cleanName).toLowerCase(),
     OriginalTitle: cleanName,
-    ChannelId: null,
+    ChannelId: undefined,
     EnableMediaSourceDisplay: true,
     DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
     PrimaryImageAspectRatio: isVideo ? 1.7777778 : 0.6666667,
@@ -3865,9 +3874,9 @@ app.get("/Genres", async (c) => {
       }
     } catch(e) {}
   }
-  let items = Array.from(genreSet).map((g, i) => ({
+  let items = Array.from(genreSet).map((g) => ({
     Name: g,
-    Id: `genre_${i}_${encodeURIComponent(g)}`,
+    Id: toValidUuid("genre_" + g),
     Type: "Genre",
     ServerId: SERVER_ID
   }));
