@@ -8,7 +8,19 @@ export interface TmdbResult {
   releaseDate: string;
 }
 
-const DEFAULT_TMDB_API_KEY = "";
+const DEFAULT_TMDB_API_KEY = "844dba0bfd8f3a4f3799f6130ef9e335";
+
+const TMDB_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept": "application/json",
+};
+
+export function getEffectiveKey(apiKey?: string): string {
+  if (apiKey && typeof apiKey === 'string' && apiKey.trim() && apiKey.trim() !== '""') {
+    return apiKey.trim();
+  }
+  return DEFAULT_TMDB_API_KEY;
+}
 
 export function cleanMediaTitle(rawTitle: string): { query: string; year?: string } {
   let str = rawTitle;
@@ -59,7 +71,7 @@ export async function searchTmdb(
   title: string,
   type: "Movie" | "Series" | "Episode" | "Season"
 ): Promise<TmdbResult | null> {
-  const key = apiKey || DEFAULT_TMDB_API_KEY;
+  const key = getEffectiveKey(apiKey);
   const { query, year } = cleanMediaTitle(title);
   if (!query) return null;
 
@@ -77,7 +89,11 @@ export async function searchTmdb(
   }
 
   try {
-    let res = await fetch(url);
+    let res = await fetch(url, { headers: TMDB_HEADERS });
+    if (!res.ok) {
+      console.error("[TMDB] searchTmdb HTTP error:", res.status, url);
+      return null;
+    }
     let data: any = await res.json();
 
     // Fallback search without year if no results
@@ -85,8 +101,10 @@ export async function searchTmdb(
       const fallbackUrl = `https://api.themoviedb.org/3/search/${searchType}?api_key=${key}&query=${encodeURIComponent(
         query
       )}&language=pt-BR&include_adult=false`;
-      res = await fetch(fallbackUrl);
-      data = await res.json();
+      res = await fetch(fallbackUrl, { headers: TMDB_HEADERS });
+      if (res.ok) {
+        data = await res.json();
+      }
     }
 
     if (data.results && data.results.length > 0) {
@@ -131,13 +149,16 @@ export async function getTmdbDetails(
   tmdbId: number,
   type: "Movie" | "Series"
 ): Promise<TmdbFullDetails | null> {
-  const key = apiKey || DEFAULT_TMDB_API_KEY;
+  const key = getEffectiveKey(apiKey);
   const endpoint = type === "Movie" ? "movie" : "tv";
   const url = `https://api.themoviedb.org/3/${endpoint}/${tmdbId}?api_key=${key}&language=pt-BR&append_to_response=credits`;
 
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    const res = await fetch(url, { headers: TMDB_HEADERS });
+    if (!res.ok) {
+      console.error("[TMDB] getTmdbDetails HTTP error:", res.status, url);
+      return null;
+    }
     const data: any = await res.json();
 
     const cast = (data.credits?.cast || []).slice(0, 10).map((c: any) => ({
@@ -185,12 +206,12 @@ export async function getTvSeasonEpisodes(
   tvId: number,
   seasonNumber: number
 ): Promise<Map<number, { name: string; overview: string; stillPath: string | null; voteAverage: number }>> {
-  const key = apiKey || DEFAULT_TMDB_API_KEY;
+  const key = getEffectiveKey(apiKey);
   const url = `https://api.themoviedb.org/3/tv/${tvId}/season/${seasonNumber}?api_key=${key}&language=pt-BR`;
   const epMap = new Map<number, { name: string; overview: string; stillPath: string | null; voteAverage: number }>();
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: TMDB_HEADERS });
     if (!res.ok) return epMap;
     const data: any = await res.json();
     for (const ep of data.episodes || []) {
@@ -232,14 +253,14 @@ export async function searchTmdbRemote(
   tmdbId?: string,
   imdbId?: string
 ): Promise<RemoteSearchResultItem[]> {
-  const key = apiKey || DEFAULT_TMDB_API_KEY;
+  const key = getEffectiveKey(apiKey);
 
   // 1. If explicit TMDB ID is provided:
   if (tmdbId && tmdbId.trim()) {
     try {
       const endpoint = type === "Series" ? "tv" : (type === "Person" ? "person" : "movie");
       const url = `https://api.themoviedb.org/3/${endpoint}/${tmdbId.trim()}?api_key=${key}&language=pt-BR`;
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: TMDB_HEADERS });
       if (res.ok) {
         const data: any = await res.json();
         const releaseDate = data.release_date || data.first_air_date || "";
@@ -271,7 +292,7 @@ export async function searchTmdbRemote(
   if (imdbId && imdbId.trim()) {
     try {
       const url = `https://api.themoviedb.org/3/find/${imdbId.trim()}?api_key=${key}&external_source=imdb_id&language=pt-BR`;
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: TMDB_HEADERS });
       if (res.ok) {
         const data: any = await res.json();
         const results = (type === "Series" ? data.tv_results : data.movie_results) || [];
@@ -322,7 +343,11 @@ export async function searchTmdbRemote(
   }
 
   try {
-    let res = await fetch(url);
+    let res = await fetch(url, { headers: TMDB_HEADERS });
+    if (!res.ok) {
+      console.error("[TMDB] searchTmdbRemote HTTP error:", res.status, url);
+      return [];
+    }
     let data: any = await res.json();
 
     // Fallback search without year if 0 results
@@ -330,8 +355,10 @@ export async function searchTmdbRemote(
       const fallbackUrl = `https://api.themoviedb.org/3/search/${searchType}?api_key=${key}&query=${encodeURIComponent(
         effectiveQuery
       )}&language=pt-BR&include_adult=false`;
-      res = await fetch(fallbackUrl);
-      data = await res.json();
+      res = await fetch(fallbackUrl, { headers: TMDB_HEADERS });
+      if (res.ok) {
+        data = await res.json();
+      }
     }
 
     if (data.results && Array.isArray(data.results)) {
@@ -366,13 +393,13 @@ export async function getTmdbImages(
   tmdbId: number,
   type: "Movie" | "Series"
 ): Promise<Array<{ url: string; thumbnailUrl: string; width: number; height: number; type: "Primary" | "Backdrop"; communityRating: number; language?: string }>> {
-  const key = apiKey || DEFAULT_TMDB_API_KEY;
+  const key = getEffectiveKey(apiKey);
   const endpoint = type === "Series" ? "tv" : "movie";
   const url = `https://api.themoviedb.org/3/${endpoint}/${tmdbId}/images?api_key=${key}`;
   const list: Array<{ url: string; thumbnailUrl: string; width: number; height: number; type: "Primary" | "Backdrop"; communityRating: number; language?: string }> = [];
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: TMDB_HEADERS });
     if (!res.ok) return list;
     const data: any = await res.json();
 

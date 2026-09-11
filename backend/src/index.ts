@@ -771,16 +771,35 @@ const defaultUserConfig = {
 
 const defaultPolicy = {
   IsAdministrator: true,
-  EnableMediaPlayback: true,
-  EnableAudioPlaybackTranscoding: false,
-  EnableVideoPlaybackTranscoding: false,
-  EnablePlaybackRemuxing: false,
+  IsHidden: false,
+  EnableCollectionManagement: true,
+  EnableSubtitleManagement: true,
+  EnableLyricManagement: true,
+  IsDisabled: false,
+  EnableUserPreferenceAccess: true,
+  EnableRemoteControlOfOtherUsers: true,
+  EnableSharedDeviceControl: true,
+  EnableRemoteAccess: true,
   EnableLiveTvManagement: true,
   EnableLiveTvAccess: true,
-  EnableSharedDeviceControl: true,
+  EnableMediaPlayback: true,
+  EnableAudioPlaybackTranscoding: true,
+  EnableVideoPlaybackTranscoding: true,
+  EnablePlaybackRemuxing: true,
+  ForceRemoteSourceTranscoding: false,
+  EnableContentDeletion: false,
+  EnableContentDownloading: true,
+  EnableSyncTranscoding: true,
+  EnableMediaConversion: true,
+  EnableAllDevices: true,
+  EnableAllChannels: true,
   EnableAllFolders: true,
   EnabledFolders: [],
   BlockedMediaFolders: [],
+  BlockedChannels: [],
+  AuthenticationProviderId: "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
+  PasswordResetProviderId: "Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider",
+  SyncPlayAccess: "CreateAndJoinGroups",
 };
 
 app.get("/users/public", async (c) => {
@@ -1003,8 +1022,11 @@ const handleCurrentUser = async (c: any) => {
     Name: name,
     Id: id,
     ServerId: SERVER_ID,
+    ServerName: "DriveFlix",
     HasPassword: true,
     HasConfiguredPassword: true,
+    HasConfiguredEasyPassword: false,
+    EnableAutoLogin: true,
     Configuration: config,
     Policy: policy,
   });
@@ -1290,7 +1312,8 @@ const handleDisplayPrefs = (c: any) => {
     SortBy: "SortName",
     IndexBy: "None",
     RememberIndexing: false,
-    PrimaryImageAspectRatio: 0,
+    PrimaryImageHeight: 250,
+    PrimaryImageWidth: 250,
     CustomPrefs: {},
     ScrollDirection: "Vertical",
     ShowBackdrop: true,
@@ -2284,6 +2307,45 @@ app.get("/Search/Hints", async (c) => {
   });
 });
 
+function buildMediaSource(row: any, parsed: any, isVideo: boolean, isAudio: boolean, container: string) {
+  return {
+    Protocol: "File",
+    Id: row.Id,
+    Path: `/media/${row.Name}`,
+    Type: "Default",
+    Container: container,
+    Size: row.Size || 100000000,
+    Name: row.Name,
+    IsRemote: false,
+    ETag: getImageTag(row.Id) || "etag_123",
+    RunTimeTicks: parsed.RunTimeTicks,
+    ReadAtNativeFramerate: false,
+    IgnoreDts: false,
+    IgnoreIndex: false,
+    GenPtsInput: false,
+    SupportsTranscoding: true,
+    SupportsDirectStream: true,
+    SupportsDirectPlay: true,
+    IsInfiniteStream: false,
+    UseMostCompatibleTranscodingProfile: false,
+    RequiresOpening: false,
+    RequiresClosing: false,
+    RequiresLooping: false,
+    SupportsProbing: true,
+    VideoType: isVideo ? "VideoFile" : undefined,
+    MediaStreams: parsed.MediaStreams,
+    MediaAttachments: [],
+    Formats: [],
+    Bitrate: parsed.Bitrate,
+    RequiredHttpHeaders: {},
+    TranscodingSubProtocol: "http",
+    DefaultAudioStreamIndex:
+      parsed.MediaStreams.find((s: any) => s.Type === "Audio")?.Index ?? 0,
+    DefaultSubtitleStreamIndex: -1,
+    HasSegments: false,
+  };
+}
+
 // Helper to get Item by Id from DB
 const getItemById = async (c: any, itemId: string) => {
   const userId = c.req.param("userId") || c.req.query("userId") || DEFAULT_ADMIN_ID;
@@ -2499,35 +2561,7 @@ const getItemById = async (c: any, itemId: string) => {
     AlbumArtist: isAudio ? "Vários Artistas" : undefined,
     AlbumArtists: isAudio ? [{ Name: "Vários Artistas", Id: "artist_varios" }] : undefined,
     MediaSources: (isVideo || isAudio)
-      ? [
-          {
-            Protocol: "Http",
-            Id: row.Id,
-            Path: streamUrl,
-            DirectStreamUrl: streamUrl,
-            TranscodingUrl: streamUrl,
-            Type: "Default",
-            Container: container,
-            Size: row.Size || 100000000,
-            Name: row.Name,
-            IsRemote: true,
-            RunTimeTicks: parsed.RunTimeTicks,
-            SupportsTranscoding: false,
-            SupportsDirectStream: true,
-            SupportsDirectPlay: true,
-            IsInfiniteStream: false,
-            RequiresOpening: false,
-            RequiresClosing: false,
-            RequiresLooping: false,
-            SupportsProbing: true,
-            VideoType: isVideo ? "VideoFile" : undefined,
-            MediaStreams: parsed.MediaStreams,
-            Bitrate: parsed.Bitrate,
-            DefaultAudioStreamIndex:
-              parsed.MediaStreams.find((s: any) => s.Type === "Audio")?.Index ?? 0,
-            DefaultSubtitleStreamIndex: -1,
-          },
-        ]
+      ? [buildMediaSource(row, parsed, isVideo, isAudio, container)]
       : undefined,
     MediaStreams: parsed.MediaStreams,
   };
@@ -2557,9 +2591,25 @@ app.get("/Items/:itemId", async (c) => {
 
 async function serveImageOrProxy(c: any, fileId: string | null | undefined, fallbackText?: string, isBackdrop?: boolean): Promise<Response> {
   const fallbackDims = isBackdrop ? "1280x720" : "400x600";
+  const text = encodeURIComponent(fallbackText || "Image");
+  const fallbackUrl = `https://placehold.co/${fallbackDims}/141414/e50914.png?text=${text}`;
+
+  const serveFallback = async () => {
+    try {
+      const resp = await fetch(fallbackUrl);
+      if (resp.ok) {
+        const headers = new Headers();
+        headers.set("Content-Type", "image/png");
+        headers.set("Cache-Control", "public, max-age=86400");
+        headers.set("Access-Control-Allow-Origin", "*");
+        return new Response(resp.body, { headers });
+      }
+    } catch (e) {}
+    return c.redirect(fallbackUrl, 302);
+  };
+
   if (!fileId) {
-    const text = encodeURIComponent(fallbackText || "Image");
-    return c.redirect(`https://placehold.co/${fallbackDims}/141414/e50914.png?text=${text}`, 302);
+    return serveFallback();
   }
 
   // 1. Data URL (Base64)
@@ -2616,8 +2666,7 @@ async function serveImageOrProxy(c: any, fileId: string | null | undefined, fall
     console.error("Failed to fetch image from Google Drive:", fileId, e);
   }
 
-  const text = encodeURIComponent(fallbackText || "Image");
-  return c.redirect(`https://placehold.co/${fallbackDims}/141414/e50914.png?text=${text}`, 302);
+  return serveFallback();
 }
 
 const imageHandler = async (c: any) => {
@@ -2640,8 +2689,40 @@ const imageHandler = async (c: any) => {
     return serveImageOrProxy(c, null, lib?.Name || itemId, isBackdrop);
   }
 
+  // 2.1 Person Images
+  if (itemId.startsWith("person_")) {
+    const tag = c.req.query("tag") || c.req.query("Tag");
+    if (tag && (tag.startsWith("http://") || tag.startsWith("https://"))) {
+      return serveImageOrProxy(c, tag, itemId);
+    }
+    const tmdbPersonId = itemId.replace("person_", "");
+    if (/^\d+$/.test(tmdbPersonId)) {
+      try {
+        const pRes = await fetch(`https://api.themoviedb.org/3/person/${tmdbPersonId}?api_key=844dba0bfd8f3a4f3799f6130ef9e335`, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+          }
+        });
+        if (pRes.ok) {
+          const pData: any = await pRes.json();
+          if (pData.profile_path) {
+            return serveImageOrProxy(c, `https://image.tmdb.org/t/p/w185${pData.profile_path}`, pData.name);
+          }
+        }
+      } catch (e) {}
+    }
+    return serveImageOrProxy(c, null, itemId);
+  }
+
   const item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
-  if (!item) return c.notFound();
+  if (!item) {
+    const tag = c.req.query("tag") || c.req.query("Tag");
+    if (tag && (tag.startsWith("http://") || tag.startsWith("https://"))) {
+      return serveImageOrProxy(c, tag, itemId, isBackdrop);
+    }
+    return c.notFound();
+  }
 
   let fileId = isPrimary ? item.PrimaryImageFileId : item.BackdropImageFileId;
   if (!fileId && !isPrimary) {
@@ -3322,30 +3403,7 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
       AlbumId: isAudio ? "album_view_musicas" : undefined,
       AlbumArtist: isAudio ? "Vários Artistas" : undefined,
       AlbumArtists: isAudio ? [{ Name: "Vários Artistas", Id: "artist_varios" }] : undefined,
-      MediaSources: [
-        {
-          Protocol: "Http",
-          Id: row.Id,
-          Path: streamUrl,
-          DirectStreamUrl: streamUrl,
-          TranscodingUrl: streamUrl,
-          Type: "Default",
-          Container: container,
-          Size: row.Size || 100000000,
-          Name: row.Name,
-          IsRemote: true,
-          RunTimeTicks: parsed.RunTimeTicks,
-          SupportsTranscoding: false,
-          SupportsDirectStream: true,
-          SupportsDirectPlay: true,
-          VideoType: isAudio ? undefined : "VideoFile",
-          MediaStreams: parsed.MediaStreams,
-          Bitrate: parsed.Bitrate,
-          DefaultAudioStreamIndex:
-            parsed.MediaStreams.find((s: any) => s.Type === "Audio")?.Index ?? 0,
-          DefaultSubtitleStreamIndex: -1,
-        }
-      ]
+      MediaSources: [buildMediaSource(row, parsed, !isAudio, isAudio, container)]
     };
   });
   return c.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 });
@@ -3529,33 +3587,45 @@ const handleRemoteSearch = async (c: any, defaultType: "Movie" | "Series" | "Per
     body = await c.req.json();
   } catch (e) {}
 
-  const searchInfo = body.SearchInfo || {};
-  const query = searchInfo.Name || "";
-  const year = searchInfo.Year || searchInfo.ProductionYear;
-  const tmdbId = searchInfo.ProviderIds?.Tmdb || searchInfo.ProviderIds?.tmdb;
-  const imdbId = searchInfo.ProviderIds?.Imdb || searchInfo.ProviderIds?.imdb;
+  const searchInfo = body.SearchInfo || body.searchInfo || body;
+  const query = searchInfo.Name || searchInfo.name || body.Name || body.name || c.req.query("SearchTerm") || c.req.query("searchTerm") || "";
+  const year = searchInfo.Year || searchInfo.year || searchInfo.ProductionYear || searchInfo.productionYear;
+  const tmdbId = searchInfo.ProviderIds?.Tmdb || searchInfo.ProviderIds?.tmdb || searchInfo.providerIds?.tmdb || searchInfo.providerIds?.Tmdb;
+  const imdbId = searchInfo.ProviderIds?.Imdb || searchInfo.ProviderIds?.imdb || searchInfo.providerIds?.imdb || searchInfo.providerIds?.Imdb;
 
+  const apiKey = c.env.TMDB_API_KEY || "844dba0bfd8f3a4f3799f6130ef9e335";
+  console.log(`[RemoteSearch] type=${defaultType} query="${query}" year=${year} tmdbId=${tmdbId} imdbId=${imdbId}`);
   const results = await searchTmdbRemote(
-    c.env.TMDB_API_KEY,
+    apiKey,
     query,
     defaultType,
     year ? parseInt(String(year)) : undefined,
     tmdbId,
     imdbId
   );
+  console.log(`[RemoteSearch] found ${results.length} results`);
 
   return c.json(results);
 };
 
 app.post("/Items/RemoteSearch/Movie", (c) => handleRemoteSearch(c, "Movie"));
+app.post("/items/remotesearch/movie", (c) => handleRemoteSearch(c, "Movie"));
 app.post("/Items/RemoteSearch/Series", (c) => handleRemoteSearch(c, "Series"));
+app.post("/items/remotesearch/series", (c) => handleRemoteSearch(c, "Series"));
 app.post("/Items/RemoteSearch/BoxSet", (c) => handleRemoteSearch(c, "BoxSet"));
+app.post("/items/remotesearch/boxset", (c) => handleRemoteSearch(c, "BoxSet"));
 app.post("/Items/RemoteSearch/Person", (c) => handleRemoteSearch(c, "Person"));
+app.post("/items/remotesearch/person", (c) => handleRemoteSearch(c, "Person"));
 app.post("/Items/RemoteSearch/Trailer", (c) => handleRemoteSearch(c, "Movie"));
+app.post("/items/remotesearch/trailer", (c) => handleRemoteSearch(c, "Movie"));
 app.post("/Items/RemoteSearch/MusicVideo", (c) => handleRemoteSearch(c, "Movie"));
+app.post("/items/remotesearch/musicvideo", (c) => handleRemoteSearch(c, "Movie"));
 app.post("/Items/RemoteSearch/Book", (c) => c.json([]));
+app.post("/items/remotesearch/book", (c) => c.json([]));
 app.post("/Items/RemoteSearch/MusicAlbum", (c) => c.json([]));
+app.post("/items/remotesearch/musicalbum", (c) => c.json([]));
 app.post("/Items/RemoteSearch/MusicArtist", (c) => c.json([]));
+app.post("/items/remotesearch/musicartist", (c) => c.json([]));
 
 // Apply Remote Search Result to an item
 app.post("/Items/RemoteSearch/Apply/:itemId", async (c) => {
@@ -3772,33 +3842,7 @@ const handlePlaybackInfo = async (c: any) => {
   return c.json({
     PlaySessionId: toValidUuid("playsession_" + row.Id),
     MediaSources: [
-      {
-        Protocol: "Http",
-        Id: row.Id,
-        Path: fullStreamUrl,
-        DirectStreamUrl: fullStreamUrl,
-        TranscodingUrl: fullStreamUrl,
-        Type: "Default",
-        Container: container,
-        Size: row.Size || 100000000,
-        Name: row.Name,
-        IsRemote: true,
-        RunTimeTicks: parsed.RunTimeTicks,
-        SupportsTranscoding: false,
-        SupportsDirectStream: true,
-        SupportsDirectPlay: true,
-        IsInfiniteStream: false,
-        RequiresOpening: false,
-        RequiresClosing: false,
-        RequiresLooping: false,
-        SupportsProbing: true,
-        VideoType: isVideo ? "VideoFile" : undefined,
-        MediaStreams: parsed.MediaStreams,
-        Bitrate: parsed.Bitrate,
-        DefaultAudioStreamIndex:
-          parsed.MediaStreams.find((s: any) => s.Type === "Audio")?.Index ?? 0,
-        DefaultSubtitleStreamIndex: -1,
-      },
+      buildMediaSource(row, parsed, isVideo, isAudio, container)
     ],
   });
 };

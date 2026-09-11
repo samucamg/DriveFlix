@@ -6,8 +6,8 @@ account_id = "098fb7e203d7971b4f9cac593afd5641"
 [assets]
 directory = "public"
 
-# [vars]
-# MY_VARIABLE = "production_value"
+[vars]
+TMDB_API_KEY = "844dba0bfd8f3a4f3799f6130ef9e335"
 
 # [[kv_namespaces]]
 # binding = "MY_KV_NAMESPACE"
