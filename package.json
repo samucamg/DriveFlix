@@ -1,5 +1,5 @@
 {
-  "name": "driveflix",
+  "name": "driveflin",
   "version": "1.0.0",
   "description": "Serverless Jellyfin Media Server running on Cloudflare Workers and Google Drive",
   "author": "samucamg",

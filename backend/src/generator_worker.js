@@ -279,7 +279,7 @@ const htmlContent = `<!DOCTYPE html>
     <div class="header">
       <div>
         <a href="https://driveflin.org">
-          <img class="brand-logo" src="https://raw.githubusercontent.com/samucamg/DriveFlix/main/assets/DriveFlin.png" alt="DriveFlin">
+          <img class="brand-logo" src="https://raw.githubusercontent.com/samucamg/DriveFlin/main/assets/DriveFlin.png" alt="DriveFlin">
         </a>
       </div>
       <div class="logo-text">🎬 Drive<span>Flin</span> Generator</div>
@@ -372,7 +372,7 @@ const htmlContent = `<!DOCTYPE html>
     <div class="footer">
       <a href="https://driveflin.org" target="_blank">← Ir para driveflin.org</a> &nbsp;•&nbsp; 
       <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console ↗</a> &nbsp;•&nbsp; 
-      <a href="https://github.com/samucamg/DriveFlix" target="_blank">GitHub ↗</a>
+      <a href="https://github.com/samucamg/DriveFlin" target="_blank">GitHub ↗</a>
     </div>
   </div>
 

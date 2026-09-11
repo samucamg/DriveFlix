@@ -38,6 +38,16 @@ app.use(
   }),
 );
 
+// Logging de requisições em tempo real para diagnóstico
+app.use("*", async (c, next) => {
+  const p = c.req.path;
+  if (!p.startsWith("/web/") && !p.includes("socket") && !p.includes("SyncPlay")) {
+    const ua = c.req.header("user-agent") || "";
+    console.log(`[REQ] ${c.req.method} ${c.req.url} | UA: ${ua.slice(0, 60)}`);
+  }
+  await next();
+});
+
 function getImageTag(fileId: string | null | undefined): string | undefined {
   if (!fileId) return undefined;
   let hash = 0;
@@ -76,6 +86,38 @@ export function toValidUuid(str: string | null | undefined): string {
   }
   const toHex = (n: number) => (n >>> 0).toString(16).padStart(8, "0");
   return (toHex(h1) + toHex(h2) + toHex(h3) + toHex(h4)).toLowerCase();
+}
+
+export async function resolveLibrary(db: D1Database, idOrUuid: string | null | undefined): Promise<any> {
+  if (!idOrUuid) return null;
+  const clean = idOrUuid.trim().replace(/-/g, "").toLowerCase();
+  let row = await db.prepare("SELECT * FROM Libraries WHERE Id = ? OR Uuid = ?").bind(idOrUuid, clean).first();
+  if (row) return row;
+  const computed = toValidUuid(idOrUuid);
+  if (computed !== clean) {
+    row = await db.prepare("SELECT * FROM Libraries WHERE Uuid = ?").bind(computed).first();
+    if (row) return row;
+  }
+  if (/^[0-9a-f]{32}$/.test(clean)) {
+    const { results } = await db.prepare("SELECT * FROM Libraries").all();
+    for (const lib of (results || [])) {
+      if (toValidUuid((lib as any).Id) === clean) return lib;
+    }
+  }
+  return null;
+}
+
+export async function resolveItem(db: D1Database, idOrUuid: string | null | undefined): Promise<any> {
+  if (!idOrUuid) return null;
+  const clean = idOrUuid.trim().replace(/-/g, "").toLowerCase();
+  let row = await db.prepare("SELECT * FROM Items WHERE Id = ? OR Uuid = ?").bind(idOrUuid, clean).first();
+  if (row) return row;
+  const computed = toValidUuid(idOrUuid);
+  if (computed !== clean) {
+    row = await db.prepare("SELECT * FROM Items WHERE Uuid = ?").bind(computed).first();
+    if (row) return row;
+  }
+  return null;
 }
 
 import { injectScript } from "./inject";
@@ -140,6 +182,19 @@ async function ensureSchema(db: D1Database) {
         log TEXT
       )`)
     ]);
+
+    try {
+      await db.prepare("ALTER TABLE Items ADD COLUMN Uuid TEXT").run();
+    } catch (e) {}
+    try {
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_items_uuid ON Items(Uuid)").run();
+    } catch (e) {}
+    try {
+      await db.prepare("ALTER TABLE Libraries ADD COLUMN Uuid TEXT").run();
+    } catch (e) {}
+    try {
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_libraries_uuid ON Libraries(Uuid)").run();
+    } catch (e) {}
 
     const user = await db.prepare("SELECT Id FROM Users LIMIT 1").first();
     if (!user) {
@@ -280,8 +335,8 @@ app.get("/sync", async (c) => {
 // Dashboard de Setup Simples
 app.get("/setup", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT * FROM Libraries").all();
-  let html = `<html><head><title>DriveFlix Setup</title><style>body{font-family:sans-serif;padding:20px;background:#141414;color:#fff;}table{width:100%;border-collapse:collapse;margin-bottom:20px;}th,td{border:1px solid #333;padding:10px;text-align:left;}input{padding:5px;}button{padding:8px 15px;background:#e50914;color:white;border:none;cursor:pointer;}</style></head><body>
-    <h1>DriveFlix Library Setup</h1>
+  let html = `<html><head><title>DriveFlin Setup</title><style>body{font-family:sans-serif;padding:20px;background:#141414;color:#fff;}table{width:100%;border-collapse:collapse;margin-bottom:20px;}th,td{border:1px solid #333;padding:10px;text-align:left;}input{padding:5px;}button{padding:8px 15px;background:#e50914;color:white;border:none;cursor:pointer;}</style></head><body>
+    <h1>DriveFlin Library Setup</h1>
     <table>
       <tr><th>ID</th><th>Name</th><th>Google Drive Folder ID</th><th>Action</th></tr>`;
 
@@ -309,10 +364,11 @@ app.get("/setup", async (c) => {
 
 app.post("/setup/add", async (c) => {
   const body = await c.req.parseBody();
+  const libId = body.id as string;
   await c.env.DB.prepare(
-    "INSERT INTO Libraries (Id, Name, FolderId) VALUES (?, ?, ?)",
+    "INSERT INTO Libraries (Id, Name, FolderId, Uuid) VALUES (?, ?, ?, ?)",
   )
-    .bind(body.id, body.name, body.folderId)
+    .bind(libId, body.name, body.folderId, toValidUuid(libId))
     .run();
   return c.redirect("/setup");
 });
@@ -359,7 +415,7 @@ const getSystemInfo = (c: any) => {
     ],
     LocalAddress: origin,
     WanAddress: origin,
-    ServerName: "DriveFlix",
+    ServerName: "DriveFlin",
     Version: "12.0.0",
     ProductName: "Jellyfin Server",
     Id: SERVER_ID,
@@ -372,8 +428,8 @@ app.get("/System/Info/Public", getSystemInfo);
 app.get("/system/info/public", getSystemInfo);
 app.get("/System/Info", getSystemInfo);
 app.get("/system/info", getSystemInfo);
-app.get("/System/Endpoint", (c) => c.json({ IsLocal: false }));
-app.get("/system/endpoint", (c) => c.json({ IsLocal: false }));
+app.get("/System/Endpoint", (c) => c.json({ IsLocal: false, IsInNetwork: false }));
+app.get("/system/endpoint", (c) => c.json({ IsLocal: false, IsInNetwork: false }));
 
 // WebSocket support for Jellyfin live session updates
 app.get("/socket", (c) => {
@@ -685,7 +741,7 @@ const getScheduledTasksList = () => {
       State: "Idle",
       CurrentProgressPercentage: 0,
       Id: "task_backup_database",
-      Description: "Exporta backup completo do DriveFlix para a pasta DriveFlix_Backups no Google Drive",
+      Description: "Exporta backup completo do DriveFlin para a pasta DriveFlin_Backups no Google Drive",
       Category: "Maintenance",
       IsHidden: false,
       Key: "BackupDatabase",
@@ -1022,7 +1078,7 @@ const handleCurrentUser = async (c: any) => {
     Name: name,
     Id: id,
     ServerId: SERVER_ID,
-    ServerName: "DriveFlix",
+    ServerName: "DriveFlin",
     HasPassword: true,
     HasConfiguredPassword: true,
     HasConfiguredEasyPassword: false,
@@ -1168,13 +1224,21 @@ app.post("/sessions/logout", (c) => new Response(null, { status: 204 }));
 const handlePlayingProgress = async (c: any) => {
   try {
     const body = await c.req.json().catch(() => ({}));
-    const itemId = body.ItemId || body.itemId || c.req.query("ItemId") || c.req.query("itemId");
+    const rawItemId = body.ItemId || body.itemId || c.req.query("ItemId") || c.req.query("itemId");
     const positionTicks = body.PositionTicks ?? body.positionTicks ?? parseInt(c.req.query("PositionTicks") || c.req.query("positionTicks") || "0");
     const userId = toValidUuid(body.UserId || body.userId || c.req.query("UserId") || c.req.query("userId"));
-    if (itemId && positionTicks > 0) {
+    if (rawItemId && positionTicks > 0) {
+      const item = await resolveItem(c.env.DB, rawItemId);
+      const dbId = item ? item.Id : rawItemId;
+      const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
       await c.env.DB.prepare(
         "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
-      ).bind(userId, itemId, positionTicks).run();
+      ).bind(userId, dbId, positionTicks).run();
+      if (uuidId !== dbId) {
+        await c.env.DB.prepare(
+          "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
+        ).bind(userId, uuidId, positionTicks).run();
+      }
     }
   } catch (e) {}
   return new Response(null, { status: 204 });
@@ -1183,12 +1247,12 @@ const handlePlayingProgress = async (c: any) => {
 const handlePlayingStopped = async (c: any) => {
   try {
     const body = await c.req.json().catch(() => ({}));
-    const itemId = body.ItemId || body.itemId || c.req.query("ItemId") || c.req.query("itemId");
+    const rawItemId = body.ItemId || body.itemId || c.req.query("ItemId") || c.req.query("itemId");
     const positionTicks = body.PositionTicks ?? body.positionTicks ?? parseInt(c.req.query("PositionTicks") || c.req.query("positionTicks") || "0");
     const userId = toValidUuid(body.UserId || body.userId || c.req.query("UserId") || c.req.query("userId"));
     let played = 0;
-    if (itemId) {
-      const item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
+    if (rawItemId) {
+      const item: any = await resolveItem(c.env.DB, rawItemId);
       if (item && item.MediaInfo) {
         try {
           const info = JSON.parse(item.MediaInfo);
@@ -1196,9 +1260,16 @@ const handlePlayingStopped = async (c: any) => {
           if (dur > 0 && positionTicks / dur > 0.9) played = 1;
         } catch (e) {}
       }
+      const dbId = item ? item.Id : rawItemId;
+      const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
       await c.env.DB.prepare(
         "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, Played = excluded.Played, LastPlayedDate = excluded.LastPlayedDate"
-      ).bind(userId, itemId, played ? 0 : positionTicks, played).run();
+      ).bind(userId, dbId, played ? 0 : positionTicks, played).run();
+      if (uuidId !== dbId) {
+        await c.env.DB.prepare(
+          "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, Played = excluded.Played, LastPlayedDate = excluded.LastPlayedDate"
+        ).bind(userId, uuidId, played ? 0 : positionTicks, played).run();
+      }
     }
   } catch (e) {}
   return new Response(null, { status: 204 });
@@ -1206,6 +1277,8 @@ const handlePlayingStopped = async (c: any) => {
 
 app.post("/Sessions/Playing", (c) => new Response(null, { status: 204 }));
 app.post("/sessions/playing", (c) => new Response(null, { status: 204 }));
+app.post("/Sessions/Playing/Ping", (c) => new Response(null, { status: 204 }));
+app.post("/sessions/playing/ping", (c) => new Response(null, { status: 204 }));
 app.post("/Sessions/Playing/Progress", handlePlayingProgress);
 app.post("/sessions/playing/progress", handlePlayingProgress);
 app.post("/Sessions/Playing/Stopped", handlePlayingStopped);
@@ -1217,12 +1290,20 @@ app.post("/users/:userId/playingitems/:itemId", (c) => new Response(null, { stat
 app.post("/Users/:userId/PlayingItems/:itemId/Progress", async (c) => {
   try {
     const userId = toValidUuid(c.req.param("userId"));
-    const itemId = c.req.param("itemId");
+    const rawItemId = c.req.param("itemId");
     const pos = parseInt(c.req.query("positionTicks") || c.req.query("PositionTicks") || "0");
-    if (itemId && pos > 0) {
+    if (rawItemId && pos > 0) {
+      const item = await resolveItem(c.env.DB, rawItemId);
+      const dbId = item ? item.Id : rawItemId;
+      const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
       await c.env.DB.prepare(
         "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
-      ).bind(userId, itemId, pos).run();
+      ).bind(userId, dbId, pos).run();
+      if (uuidId !== dbId) {
+        await c.env.DB.prepare(
+          "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
+        ).bind(userId, uuidId, pos).run();
+      }
     }
   } catch (e) {}
   return new Response(null, { status: 204 });
@@ -1230,13 +1311,21 @@ app.post("/Users/:userId/PlayingItems/:itemId/Progress", async (c) => {
 app.delete("/Users/:userId/PlayingItems/:itemId", (c) => new Response(null, { status: 204 }));
 app.delete("/users/:userId/playingitems/:itemId", (c) => new Response(null, { status: 204 }));
 
-app.post("/Users/:userId/PlayedItems/:itemId", async (c) => {
+const handlePlayedItem = async (c: any) => {
   const userId = toValidUuid(c.req.param("userId"));
-  const itemId = c.req.param("itemId");
+  const rawItemId = c.req.param("itemId");
+  const item = await resolveItem(c.env.DB, rawItemId);
+  const dbId = item ? item.Id : rawItemId;
+  const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
   try {
     await c.env.DB.prepare(
       "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, 0, 1, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = 0, Played = 1, LastPlayedDate = excluded.LastPlayedDate"
-    ).bind(userId, itemId).run();
+    ).bind(userId, dbId).run();
+    if (uuidId !== dbId) {
+      await c.env.DB.prepare(
+        "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, 0, 1, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = 0, Played = 1, LastPlayedDate = excluded.LastPlayedDate"
+      ).bind(userId, uuidId).run();
+    }
   } catch (e) {}
   return c.json({
     PlaybackPositionTicks: 0,
@@ -1244,18 +1333,28 @@ app.post("/Users/:userId/PlayedItems/:itemId", async (c) => {
     IsFavorite: false,
     Played: true,
     PlayedPercentage: 100,
-    Key: itemId,
-    ItemId: itemId,
+    Key: uuidId,
+    ItemId: uuidId,
   });
-});
+};
+app.post("/Users/:userId/PlayedItems/:itemId", handlePlayedItem);
+app.post("/users/:userId/playeditems/:itemId", handlePlayedItem);
 
-app.delete("/Users/:userId/PlayedItems/:itemId", async (c) => {
+const handleUnplayedItem = async (c: any) => {
   const userId = toValidUuid(c.req.param("userId"));
-  const itemId = c.req.param("itemId");
+  const rawItemId = c.req.param("itemId");
+  const item = await resolveItem(c.env.DB, rawItemId);
+  const dbId = item ? item.Id : rawItemId;
+  const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
   try {
     await c.env.DB.prepare(
       "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, 0, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = 0, Played = 0, LastPlayedDate = excluded.LastPlayedDate"
-    ).bind(userId, itemId).run();
+    ).bind(userId, dbId).run();
+    if (uuidId !== dbId) {
+      await c.env.DB.prepare(
+        "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, 0, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = 0, Played = 0, LastPlayedDate = excluded.LastPlayedDate"
+      ).bind(userId, uuidId).run();
+    }
   } catch (e) {}
   return c.json({
     PlaybackPositionTicks: 0,
@@ -1263,47 +1362,70 @@ app.delete("/Users/:userId/PlayedItems/:itemId", async (c) => {
     IsFavorite: false,
     Played: false,
     PlayedPercentage: 0,
-    Key: itemId,
-    ItemId: itemId,
+    Key: uuidId,
+    ItemId: uuidId,
   });
-});
+};
+app.delete("/Users/:userId/PlayedItems/:itemId", handleUnplayedItem);
+app.delete("/users/:userId/playeditems/:itemId", handleUnplayedItem);
 
-app.post("/Users/:userId/FavoriteItems/:itemId", async (c) => {
+const handleFavoriteItem = async (c: any) => {
   const userId = toValidUuid(c.req.param("userId"));
-  const itemId = c.req.param("itemId");
+  const rawItemId = c.req.param("itemId");
+  const item = await resolveItem(c.env.DB, rawItemId);
+  const dbId = item ? item.Id : rawItemId;
+  const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
   try {
     await c.env.DB.prepare(
       "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate) VALUES (?, ?, 0, 0, 1, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET IsFavorite = 1"
-    ).bind(userId, itemId).run();
+    ).bind(userId, dbId).run();
+    if (uuidId !== dbId) {
+      await c.env.DB.prepare(
+        "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate) VALUES (?, ?, 0, 0, 1, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET IsFavorite = 1"
+      ).bind(userId, uuidId).run();
+    }
   } catch (e) {}
   return c.json({
     PlaybackPositionTicks: 0,
     PlayCount: 0,
     IsFavorite: true,
     Played: false,
-    Key: itemId,
-    ItemId: itemId,
+    Key: uuidId,
+    ItemId: uuidId,
   });
-});
+};
+app.post("/Users/:userId/FavoriteItems/:itemId", handleFavoriteItem);
+app.post("/users/:userId/favoriteitems/:itemId", handleFavoriteItem);
 
-app.delete("/Users/:userId/FavoriteItems/:itemId", async (c) => {
+const handleUnfavoriteItem = async (c: any) => {
   const userId = toValidUuid(c.req.param("userId"));
-  const itemId = c.req.param("itemId");
+  const rawItemId = c.req.param("itemId");
+  const item = await resolveItem(c.env.DB, rawItemId);
+  const dbId = item ? item.Id : rawItemId;
+  const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
   try {
     await c.env.DB.prepare(
       "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate) VALUES (?, ?, 0, 0, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET IsFavorite = 0"
-    ).bind(userId, itemId).run();
+    ).bind(userId, dbId).run();
+    if (uuidId !== dbId) {
+      await c.env.DB.prepare(
+        "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate) VALUES (?, ?, 0, 0, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET IsFavorite = 0"
+      ).bind(userId, uuidId).run();
+    }
   } catch (e) {}
   return c.json({
     PlaybackPositionTicks: 0,
     PlayCount: 0,
     IsFavorite: false,
     Played: false,
-    Key: itemId,
-    ItemId: itemId,
+    Key: uuidId,
+    ItemId: uuidId,
   });
-});
+};
+app.delete("/Users/:userId/FavoriteItems/:itemId", handleUnfavoriteItem);
+app.delete("/users/:userId/favoriteitems/:itemId", handleUnfavoriteItem);
 app.post("/Sessions/Viewing", (c) => new Response(null, { status: 204 }));
+app.post("/sessions/viewing", (c) => new Response(null, { status: 204 }));
 const handleDisplayPrefs = (c: any) => {
   const id = c.req.param("id") || "usersettings";
   return c.json({
@@ -1338,25 +1460,74 @@ app.get("/users/:userId/groupingoptions", (c) => c.json([]));
 app.get("/QuickConnect/Status", (c) => c.json({ Authenticated: false }));
 app.get("/quickconnect/status", (c) => c.json({ Authenticated: false }));
 
-app.get("/Playback/BitrateTest", (c) => c.text("ok"));
-app.get("/playback/bitratetest", (c) => c.text("ok"));
+const handleBitrateTest = (c: any) => {
+  if (c.req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+      },
+    });
+  }
+  const rawSize = parseInt(c.req.query("Size") || c.req.query("size") || "102400");
+  const size = Math.min(Math.max(isNaN(rawSize) ? 102400 : rawSize, 1024), 5000000);
+  if (c.req.method === "HEAD") {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": size.toString(),
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      },
+    });
+  }
+  const buffer = new Uint8Array(size);
+  return new Response(buffer, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "Content-Length": size.toString(),
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    },
+  });
+};
+app.all("/Playback/BitrateTest*", handleBitrateTest);
+app.all("/playback/bitratetest*", handleBitrateTest);
+
+// Endpoints de Intros e ActiveEncodings para compatibilidade com Android e clientes móveis
+const handleEmptyIntros = (c: any) => c.json({ Items: [], TotalRecordCount: 0 });
+app.all("/Items/:itemId/Intros*", handleEmptyIntros);
+app.all("/items/:itemId/intros*", handleEmptyIntros);
+app.all("/Users/:userId/Items/:itemId/Intros*", handleEmptyIntros);
+app.all("/users/:userId/items/:itemId/intros*", handleEmptyIntros);
+
+const handleActiveEncodings = (c: any) => c.json([]);
+app.all("/Videos/ActiveEncodings*", handleActiveEncodings);
+app.all("/videos/activeencodings*", handleActiveEncodings);
 
 // 3. Views (Bibliotecas: Series-Dub, etc)
 const handleVirtualFolders = async (c: any) => {
   const { results } = await c.env.DB.prepare("SELECT * FROM Libraries").all();
   return c.json(
-    results.map((row: any) => ({
-      Name: row.Name,
-      Locations: [row.FolderId],
-      CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
-      ItemId: row.Id,
-      PrimaryImageItemId: row.Id,
-      PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
-      RefreshProgress: 0,
-      RefreshStatus: "Idle",
-      ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
-      BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
-    }))
+    results.map((row: any) => {
+      const uuid = row.Uuid || toValidUuid(row.Id);
+      return {
+        Name: row.Name,
+        Locations: [row.FolderId],
+        CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
+        ItemId: uuid,
+        PrimaryImageItemId: uuid,
+        PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
+        RefreshProgress: 0,
+        RefreshStatus: "Idle",
+        ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
+        BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
+      };
+    })
   );
 };
 app.get("/Library/VirtualFolders", handleVirtualFolders);
@@ -1391,8 +1562,8 @@ app.post("/Library/VirtualFolders", async (c) => {
     } catch (e) {}
 
     await c.env.DB.prepare(
-      "INSERT OR REPLACE INTO Libraries (Id, Name, FolderId, CollectionType) VALUES (?, ?, ?, ?)"
-    ).bind(id, name, folderId, type).run();
+      "INSERT OR REPLACE INTO Libraries (Id, Name, FolderId, CollectionType, Uuid) VALUES (?, ?, ?, ?, ?)"
+    ).bind(id, name, folderId, type, toValidUuid(id)).run();
 
     // Trigger background sync for the new library
     try {
@@ -1665,7 +1836,7 @@ app.get("/Backup/:fileId/Download", async (c) => {
     return new Response(res.body, {
       headers: {
         "Content-Type": "application/json",
-        "Content-Disposition": `attachment; filename="DriveFlix_Backup_${fileId}.json"`,
+        "Content-Disposition": `attachment; filename="DriveFlin_Backup_${fileId}.json"`,
         "Access-Control-Allow-Origin": "*",
       },
     });
@@ -1709,20 +1880,23 @@ const handleUserViews = async (c: any) => {
 
   let { results } = await c.env.DB.prepare("SELECT * FROM Libraries").all();
   if (enabledFolders) {
-    results = results.filter((row: any) => enabledFolders!.includes(row.Id));
+    results = results.filter((row: any) => enabledFolders!.includes(row.Id) || (row.Uuid && enabledFolders!.includes(row.Uuid)));
   }
-  const items = results.map((row: any) => ({
-    Name: row.Name,
-    ServerId: SERVER_ID,
-    Id: row.Id,
-    IsFolder: true,
-    Type: "CollectionFolder",
-    CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
-    ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
-    PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
-    PrimaryImageItemId: row.Id,
-    BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
-  }));
+  const items = results.map((row: any) => {
+    const uuid = row.Uuid || toValidUuid(row.Id);
+    return {
+      Name: row.Name,
+      ServerId: SERVER_ID,
+      Id: uuid,
+      IsFolder: true,
+      Type: "CollectionFolder",
+      CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
+      ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
+      PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
+      PrimaryImageItemId: uuid,
+      BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
+    };
+  });
   return c.json({ Items: items, TotalRecordCount: items.length });
 };
 
@@ -1749,20 +1923,23 @@ const handleUserViewsGeneral = async (c: any) => {
 
   let { results } = await c.env.DB.prepare("SELECT * FROM Libraries").all();
   if (enabledFolders) {
-    results = results.filter((row: any) => enabledFolders!.includes(row.Id));
+    results = results.filter((row: any) => enabledFolders!.includes(row.Id) || (row.Uuid && enabledFolders!.includes(row.Uuid)));
   }
-  const items = results.map((row: any) => ({
-    Name: row.Name,
-    ServerId: SERVER_ID,
-    Id: row.Id,
-    IsFolder: true,
-    Type: "CollectionFolder",
-    CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
-    ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
-    PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
-    PrimaryImageItemId: row.Id,
-    BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
-  }));
+  const items = results.map((row: any) => {
+    const uuid = row.Uuid || toValidUuid(row.Id);
+    return {
+      Name: row.Name,
+      ServerId: SERVER_ID,
+      Id: uuid,
+      IsFolder: true,
+      Type: "CollectionFolder",
+      CollectionType: row.CollectionType || (row.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
+      ImageTags: { Primary: getImageTag(row.PrimaryImageFileId) || "cached" },
+      PrimaryImageTag: getImageTag(row.PrimaryImageFileId) || "cached",
+      PrimaryImageItemId: uuid,
+      BackdropImageTags: [getImageTag(row.PrimaryImageFileId) || "cached"],
+    };
+  });
   return c.json({ Items: items, TotalRecordCount: items.length });
 };
 
@@ -1807,10 +1984,19 @@ app.get("/Items/:itemId/ThemeMedia", (c) => {
 app.get("/Items/:itemId/Similar", (c) =>
   c.json({ Items: [], TotalRecordCount: 0 }),
 );
+app.get("/items/:itemId/similar", (c) =>
+  c.json({ Items: [], TotalRecordCount: 0 }),
+);
 app.get("/Items/:itemId/Collections", (c) =>
   c.json({ Items: [], TotalRecordCount: 0 }),
 );
+app.get("/items/:itemId/collections", (c) =>
+  c.json({ Items: [], TotalRecordCount: 0 }),
+);
 app.get("/Users/:userId/Items/:itemId/Intros", (c) =>
+  c.json({ Items: [], TotalRecordCount: 0, StartIndex: 0 }),
+);
+app.get("/users/:userId/items/:itemId/intros", (c) =>
   c.json({ Items: [], TotalRecordCount: 0, StartIndex: 0 }),
 );
 
@@ -1877,8 +2063,8 @@ const parseMediaInfo = (row: any) => {
   const isVideo = row.Type === "Movie" || row.Type === "Episode";
   const isAudio = row.Type === "Audio";
   let RunTimeTicks = isAudio ? 1800000000 : 30000000000;
-  let Width = 640;
-  let Height = 480;
+  let Width = isAudio ? 0 : 1920;
+  let Height = isAudio ? 0 : 1080;
   let MediaStreams: any[] = [];
   let Bitrate = isAudio ? 320000 : 5000000;
 
@@ -1899,67 +2085,135 @@ const parseMediaInfo = (row: any) => {
       if (info.format && info.format.bit_rate) {
         Bitrate = parseInt(info.format.bit_rate);
       }
-      if (info.streams) {
+      if (info.streams && Array.isArray(info.streams)) {
         MediaStreams = info.streams
           .map((s: any) => {
             if (s.codec_type === "video") {
               Width = s.width || Width;
               Height = s.height || Height;
+              const resolutionText = Height >= 2160 ? "4K" : Height >= 1080 ? "1080p" : Height >= 720 ? "720p" : (Height >= 480 ? "480p" : `${Height}p`);
+              const isHdr = !!(s.color_space?.includes("bt2020") || s.color_transfer?.includes("smpte2084") || s.color_transfer?.includes("arib"));
+              const codecName = s.codec_name || "h264";
+              const displayTitle = `${resolutionText} ${codecName.toUpperCase()}${isHdr ? " HDR" : " SDR"}`;
+              const avgFrameRate = s.avg_frame_rate && s.avg_frame_rate !== "0/0"
+                ? s.avg_frame_rate.includes("/")
+                  ? s.avg_frame_rate.split("/").map(Number).reduce((a: number, b: number) => a / b)
+                  : parseFloat(s.avg_frame_rate)
+                : 23.976;
+
               return {
+                Codec: codecName,
+                CodecTag: s.codec_tag_string || (codecName === "hevc" ? "hvc1" : "avc1"),
+                Language: s.tags?.language || "und",
+                TimeBase: s.time_base || "1/1000",
+                VideoRange: isHdr ? "HDR" : "SDR",
+                VideoRangeType: isHdr ? "HDR10" : "SDR",
+                AudioSpatialFormat: "None",
+                DisplayTitle: displayTitle,
+                NalLengthSize: s.nal_length_size || "4",
+                IsInterlaced: false,
+                IsAVC: codecName === "h264",
+                BitRate: s.bit_rate ? parseInt(s.bit_rate) : (Bitrate || 5000000),
+                BitDepth: s.bits_per_raw_sample ? parseInt(s.bits_per_raw_sample) : 8,
+                RefFrames: s.refs || 1,
+                IsDefault: s.disposition?.default === 1 || s.index === 0,
+                IsForced: s.disposition?.forced === 1,
+                IsHearingImpaired: s.disposition?.hearing_impaired === 1,
+                IsOriginal: s.disposition?.original === 1,
+                Height: s.height || Height,
+                Width: s.width || Width,
+                AverageFrameRate: avgFrameRate,
+                RealFrameRate: avgFrameRate,
+                ReferenceFrameRate: avgFrameRate,
+                Profile: s.profile || "High",
                 Type: "Video",
-                Index: s.index,
-                Codec: s.codec_name,
-                Profile: s.profile,
-                Width: s.width,
-                Height: s.height,
-                BitRate: s.bit_rate ? parseInt(s.bit_rate) : undefined,
-                IsDefault: s.disposition?.default === 1,
-                DisplayTitle: "1080p H264",
-                AverageFrameRate:
-                  s.avg_frame_rate && s.avg_frame_rate !== "0/0"
-                    ? s.avg_frame_rate.includes("/")
-                      ? s.avg_frame_rate
-                          .split("/")
-                          .map(Number)
-                          .reduce((a: number, b: number) => a / b)
-                      : parseFloat(s.avg_frame_rate)
-                    : undefined,
-                IsAVC: s.codec_name === "h264",
+                AspectRatio: s.display_aspect_ratio || (Width && Height ? `${Width}:${Height}` : "16:9"),
+                Index: s.index ?? 0,
+                IsExternal: false,
+                IsTextSubtitleStream: false,
+                SupportsExternalStream: false,
+                PixelFormat: s.pix_fmt || "yuv420p",
+                Level: s.level || 31,
+                IsAnamorphic: false,
               };
             } else if (s.codec_type === "audio") {
               let lang = s.tags?.language || "und";
               if (isDublado && (lang === "und" || !lang)) lang = "por";
               if (isLegendado && (lang === "und" || !lang)) lang = "eng";
               const langName = lang === "por" ? "Português" : lang === "eng" ? "Inglês" : (lang === "und" ? "Áudio Principal" : lang);
-              const chName = s.channels === 6 ? " 5.1" : (s.channels === 2 ? " Stereo" : "");
+              const ch = s.channels || 2;
+              const chLayout = s.channel_layout || (ch === 6 ? "5.1" : (ch === 1 ? "mono" : "stereo"));
+              const chName = ch === 6 ? " 5.1" : (ch === 2 ? " Stereo" : "");
+              const codecName = s.codec_name || "aac";
+              const isDefaultAudio = s.disposition?.default === 1 || s.index === 1 || s.index === 0;
+
               return {
-                Type: "Audio",
-                Index: s.index,
-                Codec: s.codec_name,
-                Profile: s.profile,
-                Channels: s.channels,
-                SampleRate: s.sample_rate ? parseInt(s.sample_rate) : undefined,
-                BitRate: s.bit_rate ? parseInt(s.bit_rate) : undefined,
+                Codec: codecName,
+                CodecTag: s.codec_tag_string || (codecName === "mp3" ? "mp3" : "mp4a"),
                 Language: lang,
-                DisplayTitle: `${langName}${chName} (${s.codec_name?.toUpperCase() || "AAC"})`,
+                TimeBase: s.time_base || "1/44100",
+                VideoRange: "Unknown",
+                VideoRangeType: "Unknown",
+                AudioSpatialFormat: "None",
+                LocalizedDefault: "Padrão",
+                LocalizedExternal: "Externo",
+                LocalizedLanguage: langName,
+                LocalizedOriginal: "Original",
+                DisplayTitle: `${langName}${chName} (${codecName.toUpperCase()})`,
                 Title: s.tags?.title || (isDublado ? "Português (Dublado)" : (isLegendado ? "Inglês (Original)" : langName)),
-                IsDefault: s.disposition?.default === 1 || s.index === 1 || s.index === 0,
+                IsInterlaced: false,
+                IsAVC: false,
+                ChannelLayout: chLayout,
+                BitRate: s.bit_rate ? parseInt(s.bit_rate) : 128000,
+                Channels: ch,
+                SampleRate: s.sample_rate ? parseInt(s.sample_rate) : 48000,
+                IsDefault: isDefaultAudio,
+                IsForced: s.disposition?.forced === 1,
+                IsHearingImpaired: s.disposition?.hearing_impaired === 1,
+                IsOriginal: s.disposition?.original === 1,
+                Profile: s.profile || "LC",
+                Type: "Audio",
+                Index: s.index ?? 1,
+                IsExternal: false,
+                IsTextSubtitleStream: false,
+                SupportsExternalStream: false,
+                Level: 0,
               };
             } else if (s.codec_type === "subtitle") {
               const lang = s.tags?.language || "und";
               const langName = lang === "por" ? "Português" : lang === "eng" ? "Inglês" : (lang === "und" ? "Legenda" : lang);
               const isForced = s.disposition?.forced === 1;
+              const codecName = s.codec_name || "subrip";
+
               return {
-                Type: "Subtitle",
-                Index: s.index,
-                Codec: s.codec_name || "subrip",
+                Codec: codecName,
+                CodecTag: s.codec_tag_string || "srt",
                 Language: lang,
+                TimeBase: s.time_base || "1/1000",
+                VideoRange: "Unknown",
+                VideoRangeType: "Unknown",
+                AudioSpatialFormat: "None",
+                LocalizedDefault: "Padrão",
+                LocalizedExternal: "Externo",
+                LocalizedForced: "Forçada",
+                LocalizedHearingImpaired: "Deficiente auditivo",
+                LocalizedLanguage: langName,
+                LocalizedOriginal: "Original",
                 DisplayTitle: `${langName}${isForced ? " (Forçada)" : ""}`,
                 Title: s.tags?.title || langName,
+                IsInterlaced: false,
+                IsAVC: false,
                 IsDefault: s.disposition?.default === 1,
                 IsForced: isForced,
-                DeliveryMethod: "Embed",
+                IsHearingImpaired: s.disposition?.hearing_impaired === 1,
+                IsOriginal: false,
+                Type: "Subtitle",
+                Index: s.index ?? 2,
+                IsExternal: false,
+                IsTextSubtitleStream: true,
                 SupportsExternalStream: true,
+                DeliveryMethod: "Embed",
+                Level: 0,
               };
             }
             return null;
@@ -1976,14 +2230,33 @@ const parseMediaInfo = (row: any) => {
     MediaStreams = [
       {
         Codec: "mp3",
+        CodecTag: "mp3",
         Type: "Audio",
         Index: 0,
         IsDefault: true,
+        IsForced: false,
+        IsHearingImpaired: false,
+        IsOriginal: false,
+        IsExternal: false,
+        IsTextSubtitleStream: false,
+        SupportsExternalStream: false,
+        IsInterlaced: false,
+        IsAVC: false,
+        AudioSpatialFormat: "None",
+        VideoRange: "Unknown",
+        VideoRangeType: "Unknown",
+        LocalizedDefault: "Padrão",
+        LocalizedExternal: "Externo",
+        LocalizedLanguage: "Português",
+        LocalizedOriginal: "Original",
         Channels: 2,
+        ChannelLayout: "stereo",
         SampleRate: 44100,
         BitRate: 320000,
         Language: "por",
         DisplayTitle: "Português - MP3 320kbps",
+        Title: "Português",
+        Level: 0,
       },
     ];
   } else if (isVideo) {
@@ -1991,27 +2264,68 @@ const parseMediaInfo = (row: any) => {
       MediaStreams = [
         {
           Codec: "h264",
+          CodecTag: "avc1",
           Type: "Video",
           Index: 0,
           IsDefault: true,
+          IsForced: false,
+          IsHearingImpaired: false,
+          IsOriginal: false,
+          IsExternal: false,
+          IsTextSubtitleStream: false,
+          SupportsExternalStream: false,
+          IsInterlaced: false,
           IsAVC: true,
+          AudioSpatialFormat: "None",
+          VideoRange: "SDR",
+          VideoRangeType: "SDR",
           Profile: "High",
           Level: 41,
           BitRate: 5000000,
+          BitDepth: 8,
+          RefFrames: 1,
           Width: 1920,
           Height: 1080,
-          DisplayTitle: "1080p H264",
+          AverageFrameRate: 23.976,
+          RealFrameRate: 23.976,
+          ReferenceFrameRate: 23.976,
+          AspectRatio: "16:9",
+          PixelFormat: "yuv420p",
+          TimeBase: "1/1000",
+          NalLengthSize: "4",
+          IsAnamorphic: false,
+          DisplayTitle: "1080p H264 SDR",
         },
         {
           Codec: "aac",
+          CodecTag: "mp4a",
           Type: "Audio",
           Index: 1,
           IsDefault: true,
+          IsForced: false,
+          IsHearingImpaired: false,
+          IsOriginal: false,
+          IsExternal: false,
+          IsTextSubtitleStream: false,
+          SupportsExternalStream: false,
+          IsInterlaced: false,
+          IsAVC: false,
+          AudioSpatialFormat: "None",
+          VideoRange: "Unknown",
+          VideoRangeType: "Unknown",
+          LocalizedDefault: "Padrão",
+          LocalizedExternal: "Externo",
+          LocalizedLanguage: isDublado ? "Português" : "Inglês",
+          LocalizedOriginal: "Original",
           Channels: 2,
+          ChannelLayout: "stereo",
           SampleRate: 48000,
+          BitRate: 128000,
           Language: isDublado ? "por" : "eng",
           Title: isDublado ? "Português (Dublado)" : "Inglês (Original)",
           DisplayTitle: isDublado ? "Português - AAC" : "Inglês - AAC",
+          Profile: "LC",
+          Level: 0,
         },
       ];
     }
@@ -2023,13 +2337,30 @@ const parseMediaInfo = (row: any) => {
         Type: "Subtitle",
         Index: MediaStreams.length,
         Codec: "subrip",
+        CodecTag: "srt",
         Language: "por",
         DisplayTitle: "Português (Embutida no Vídeo)",
         Title: "Português",
+        LocalizedDefault: "Padrão",
+        LocalizedExternal: "Externo",
+        LocalizedForced: "Forçada",
+        LocalizedHearingImpaired: "Deficiente auditivo",
+        LocalizedLanguage: "Português",
+        LocalizedOriginal: "Original",
+        IsInterlaced: false,
+        IsAVC: false,
         IsDefault: true,
         IsForced: false,
-        DeliveryMethod: "Embed",
+        IsHearingImpaired: false,
+        IsOriginal: false,
+        IsExternal: false,
+        IsTextSubtitleStream: true,
         SupportsExternalStream: true,
+        AudioSpatialFormat: "None",
+        VideoRange: "Unknown",
+        VideoRangeType: "Unknown",
+        DeliveryMethod: "Embed",
+        Level: 0,
       });
     }
   }
@@ -2056,7 +2387,7 @@ const handleResume = async (c: any) => {
     const { results } = await c.env.DB.prepare(`
       SELECT u.PlaybackPositionTicks, u.Played, u.IsFavorite, u.LastPlayedDate, i.* 
       FROM UserItemData u 
-      JOIN Items i ON u.ItemId = i.Id 
+      JOIN Items i ON (u.ItemId = i.Id OR u.ItemId = i.Uuid)
       WHERE u.UserId = ? AND u.Played = 0 AND u.PlaybackPositionTicks > 0 ${typeFilter}
       ORDER BY u.LastPlayedDate DESC LIMIT 16
     `).bind(userId).all();
@@ -2068,6 +2399,7 @@ const handleResume = async (c: any) => {
       const isAudio = row.Type === "Audio";
       const parsed = parseMediaInfo(row);
       const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
+      const itemUuid = row.Uuid || toValidUuid(row.Id);
 
       let sId = undefined;
       let sName = undefined;
@@ -2078,10 +2410,10 @@ const handleResume = async (c: any) => {
       let epImage = row.PrimaryImageFileId;
 
       if (row.Type === "Episode") {
-        const season = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(row.ParentId).first();
-        const series = season ? await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(season.ParentId).first() : null;
+        const season = await resolveItem(c.env.DB, row.ParentId);
+        const series = season ? await resolveItem(c.env.DB, season.ParentId) : null;
         if (series) {
-          sId = series.Id;
+          sId = series.Uuid || toValidUuid(series.Id);
           sName = series.Name;
           sPoster = series.PrimaryImageFileId;
           sBackdrop = series.BackdropImageFileId;
@@ -2101,20 +2433,19 @@ const handleResume = async (c: any) => {
         }
       }
 
-      const hasAnyImage = !!(epImage || sBackdrop || sPoster || row.PrimaryImageFileId);
-      const userData = buildUserData(row.Id, row, parsed.RunTimeTicks);
+      const userData = buildUserData(itemUuid, row, parsed.RunTimeTicks);
 
       return {
         Name: epName,
         ServerId: SERVER_ID,
-        Id: row.Id,
+        Id: itemUuid,
         Container: container,
         IsFolder: false,
         Type: row.Type,
-        ParentId: row.LibraryId || row.ParentId,
+        ParentId: row.ParentId ? toValidUuid(row.ParentId) : (row.LibraryId ? toValidUuid(row.LibraryId) : undefined),
         SeriesId: sId,
         SeriesName: sName,
-        SeasonId: row.Type === "Episode" ? row.ParentId : undefined,
+        SeasonId: row.Type === "Episode" ? toValidUuid(row.ParentId) : undefined,
         SeasonName: row.Type === "Episode" ? `Temporada ${row.ParentIndexNumber || 1}` : undefined,
         IndexNumber: row.IndexNumber,
         ParentIndexNumber: row.ParentIndexNumber,
@@ -2132,6 +2463,7 @@ const handleResume = async (c: any) => {
         ParentBackdropItemId: sId,
         ParentBackdropImageTags: sBackdrop ? ["cached"] : undefined,
         UserData: userData,
+        DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
       };
     }));
 
@@ -2147,9 +2479,19 @@ app.get("/users/:userId/items/resume", handleResume);
 
 const handleLatestItems = async (c: any) => {
   const userId = c.req.param("userId") || c.req.query("userId") || DEFAULT_ADMIN_ID;
-  const parentId = c.req.query("parentId") || c.req.query("ParentId");
+  let parentId = c.req.query("parentId") || c.req.query("ParentId");
   const limit = parseInt(c.req.query("limit") || c.req.query("Limit") || "16");
   const types = getQueryArray(c, "includeItemTypes");
+
+  if (parentId) {
+    const lib = await resolveLibrary(c.env.DB, parentId);
+    if (lib) {
+      parentId = lib.Id;
+    } else {
+      const parentItem = await resolveItem(c.env.DB, parentId);
+      if (parentItem) parentId = parentItem.Id;
+    }
+  }
 
   let sql = "SELECT * FROM Items WHERE 1=1";
   const params: any[] = [];
@@ -2185,16 +2527,17 @@ const handleLatestItems = async (c: any) => {
     const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
     const yearMatch = row.Name.match(/\((\d{4})\)/);
     const productionYear = yearMatch ? parseInt(yearMatch[1]) : 2024;
-    const userData = buildUserData(row.Id, userDataMap.get(row.Id), parsed.RunTimeTicks);
+    const itemUuid = row.Uuid || toValidUuid(row.Id);
+    const userData = buildUserData(itemUuid, userDataMap.get(row.Id) || userDataMap.get(itemUuid), parsed.RunTimeTicks);
 
     return {
       Name: row.Name,
       ServerId: SERVER_ID,
-      Id: row.Id,
+      Id: itemUuid,
       Container: container,
       IsFolder: isSeries,
       Type: row.Type,
-      ParentId: row.LibraryId,
+      ParentId: row.LibraryId ? toValidUuid(row.LibraryId) : undefined,
       LocationType: "FileSystem",
       MediaType: isVideo ? "Video" : (isAudio ? "Audio" : "Unknown"),
       RunTimeTicks: parsed.RunTimeTicks,
@@ -2211,6 +2554,7 @@ const handleLatestItems = async (c: any) => {
       ImageTags: { Primary: "cached" },
       BackdropImageTags: ["cached"],
       UserData: userData,
+      DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
     };
   });
 
@@ -2286,10 +2630,11 @@ app.get("/Search/Hints", async (c) => {
     const isAudio = row.Type === "Audio";
     const yearMatch = row.Name.match(/\((\d{4})\)/);
     const productionYear = yearMatch ? parseInt(yearMatch[1]) : 2024;
+    const itemUuid = row.Uuid || toValidUuid(row.Id);
 
     return {
-      ItemId: row.Id,
-      Id: row.Id,
+      ItemId: itemUuid,
+      Id: itemUuid,
       Name: row.Name,
       Type: row.Type,
       IsFolder: row.Type === "Series",
@@ -2307,10 +2652,17 @@ app.get("/Search/Hints", async (c) => {
   });
 });
 
-function buildMediaSource(row: any, parsed: any, isVideo: boolean, isAudio: boolean, container: string) {
+function buildMediaSource(row: any, parsed: any, isVideo: boolean, isAudio: boolean, container: string, requestedId?: string) {
+  const audioStream = parsed.MediaStreams.find((s: any) => s.Type === "Audio");
+  const defaultAudioIdx = audioStream ? audioStream.Index : (isVideo ? 1 : 0);
+  const mediaId = requestedId || row.Uuid || toValidUuid(row.Id);
+  const directUrl = isAudio
+    ? `/Audio/${mediaId}/stream.${container}`
+    : `/Videos/${mediaId}/stream.${container}?Static=true&mediaSourceId=${mediaId}`;
+
   return {
     Protocol: "File",
-    Id: row.Id,
+    Id: mediaId,
     Path: `/media/${row.Name}`,
     Type: "Default",
     Container: container,
@@ -2339,34 +2691,35 @@ function buildMediaSource(row: any, parsed: any, isVideo: boolean, isAudio: bool
     Bitrate: parsed.Bitrate,
     RequiredHttpHeaders: {},
     TranscodingSubProtocol: "http",
-    DefaultAudioStreamIndex:
-      parsed.MediaStreams.find((s: any) => s.Type === "Audio")?.Index ?? 0,
+    DefaultAudioStreamIndex: defaultAudioIdx,
     DefaultSubtitleStreamIndex: -1,
     HasSegments: false,
+    DirectStreamUrl: directUrl,
+    TranscodingUrl: directUrl,
   };
 }
 
 // Helper to get Item by Id from DB
 const getItemById = async (c: any, itemId: string) => {
   const userId = c.req.param("userId") || c.req.query("userId") || DEFAULT_ADMIN_ID;
-  if (itemId.startsWith("view_")) {
-    const { results } = await c.env.DB.prepare("SELECT * FROM Libraries WHERE Id = ?").bind(itemId).all();
-    if (results.length) {
-      const lib = results[0];
-      const hasImage = !!lib.PrimaryImageFileId;
-      return {
-        Name: lib.Name,
-        ServerId: SERVER_ID,
-        Id: lib.Id,
-        IsFolder: true,
-        Type: "CollectionFolder",
-        CollectionType: lib.CollectionType || (lib.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
-        LocationType: "FileSystem",
-        PrimaryImageTag: hasImage ? "cached" : undefined,
-        ImageTags: hasImage ? { Primary: "cached" } : {},
-        BackdropImageTags: [],
-      };
-    }
+  
+  // 1. Check if Library (by Id or Uuid)
+  const lib = await resolveLibrary(c.env.DB, itemId);
+  if (lib) {
+    const hasImage = !!lib.PrimaryImageFileId;
+    const libUuid = lib.Uuid || toValidUuid(lib.Id);
+    return {
+      Name: lib.Name,
+      ServerId: SERVER_ID,
+      Id: libUuid,
+      IsFolder: true,
+      Type: "CollectionFolder",
+      CollectionType: lib.CollectionType || (lib.Name.toLowerCase().includes("filme") ? "movies" : "tvshows"),
+      LocationType: "FileSystem",
+      PrimaryImageTag: hasImage ? "cached" : undefined,
+      ImageTags: hasImage ? { Primary: "cached" } : {},
+      BackdropImageTags: [],
+    };
   }
 
   if (itemId.startsWith("album_")) {
@@ -2402,11 +2755,10 @@ const getItemById = async (c: any, itemId: string) => {
     };
   }
 
-  const { results } = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?")
-    .bind(itemId)
-    .all();
-  if (!results.length) return null;
-  const row = results[0];
+  const row = await resolveItem(c.env.DB, itemId);
+  if (!row) return null;
+
+  const itemUuid = row.Uuid || toValidUuid(row.Id);
   const isVideo = row.Type === "Movie" || row.Type === "Episode";
   const isAudio = row.Type === "Audio";
   const isSeries = row.Type === "Series";
@@ -2414,9 +2766,6 @@ const getItemById = async (c: any, itemId: string) => {
 
   const parsed = parseMediaInfo(row);
   const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
-  const url = new URL(c.req.url);
-  const origin = `${url.protocol}//${url.host}`;
-  const streamUrl = isAudio ? `${origin}/Audio/${row.Id}/universal` : `${origin}/Videos/${row.Id}/stream.${container}`;
 
   let childCount: number | undefined = undefined;
   let recursiveCount: number | undefined = undefined;
@@ -2435,20 +2784,20 @@ const getItemById = async (c: any, itemId: string) => {
       recursiveCount = sCounts.episodes || 0;
     }
   } else if (isSeason) {
-    const sRow = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(row.ParentId).first();
+    const sRow = await resolveItem(c.env.DB, row.ParentId);
     if (sRow) {
       seriesName = sRow.Name;
-      seriesId = sRow.Id;
+      seriesId = sRow.Uuid || toValidUuid(sRow.Id);
     }
   } else if (row.Type === "Episode") {
-    seasonRow = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(row.ParentId).first();
+    seasonRow = await resolveItem(c.env.DB, row.ParentId);
     if (seasonRow) {
-      seasonId = seasonRow.Id;
+      seasonId = seasonRow.Uuid || toValidUuid(seasonRow.Id);
       seasonName = seasonRow.Name;
-      const sRow = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(seasonRow.ParentId).first();
+      const sRow = await resolveItem(c.env.DB, seasonRow.ParentId);
       if (sRow) {
         seriesName = sRow.Name;
-        seriesId = sRow.Id;
+        seriesId = sRow.Uuid || toValidUuid(sRow.Id);
       }
     }
   }
@@ -2498,21 +2847,21 @@ const getItemById = async (c: any, itemId: string) => {
 
   const parentId = isSeason 
     ? seriesId 
-    : (row.Type === "Episode" ? (seasonId || row.ParentId) : row.LibraryId);
+    : (row.Type === "Episode" ? (seasonId || toValidUuid(row.ParentId)) : (row.LibraryId ? toValidUuid(row.LibraryId) : undefined));
 
   let userItemData: any = null;
   try {
     userItemData = await c.env.DB.prepare(
-      "SELECT PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate FROM UserItemData WHERE UserId = ? AND ItemId = ?"
-    ).bind(userId, row.Id).first();
+      "SELECT PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate FROM UserItemData WHERE UserId = ? AND (ItemId = ? OR ItemId = ?)"
+    ).bind(userId, row.Id, itemUuid).first();
   } catch (e) {}
 
-  const userData = buildUserData(row.Id, userItemData, parsed.RunTimeTicks);
+  const userData = buildUserData(itemUuid, userItemData, parsed.RunTimeTicks);
 
   return {
     Name: cleanName,
     ServerId: SERVER_ID,
-    Id: row.Id,
+    Id: itemUuid,
     ParentId: parentId,
     IsFolder: isSeries || isSeason,
     Type: row.Type,
@@ -2531,7 +2880,7 @@ const getItemById = async (c: any, itemId: string) => {
     SeriesName: seriesName,
     SeriesId: seriesId,
     SeasonName: seasonName || (row.Type === "Episode" ? `Temporada ${row.ParentIndexNumber || 1}` : undefined),
-    SeasonId: isSeason ? row.Id : (row.Type === "Episode" ? (seasonId || row.ParentId) : undefined),
+    SeasonId: isSeason ? itemUuid : (row.Type === "Episode" ? (seasonId || toValidUuid(row.ParentId)) : undefined),
     ParentPrimaryImageItemId: seriesId,
     ParentPrimaryImageTag: seriesId ? "cached" : undefined,
     SeriesPrimaryImageTag: seriesId ? "cached" : undefined,
@@ -2560,8 +2909,28 @@ const getItemById = async (c: any, itemId: string) => {
     AlbumId: isAudio ? "album_view_musicas" : undefined,
     AlbumArtist: isAudio ? "Vários Artistas" : undefined,
     AlbumArtists: isAudio ? [{ Name: "Vários Artistas", Id: "artist_varios" }] : undefined,
+    CanDownload: false,
+    CanDelete: false,
+    Chapters: [],
+    Trickplay: {},
+    DateCreated: row.DateCreated ? `${String(row.DateCreated).replace(" ", "T")}.0000000Z` : "2024-01-01T00:00:00.0000000Z",
+    SortName: (cleanMediaTitle(cleanName).query || cleanName).toLowerCase(),
+    OriginalTitle: cleanName,
+    ChannelId: null,
+    EnableMediaSourceDisplay: true,
+    DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
+    PrimaryImageAspectRatio: isVideo ? 1.7777778 : 0.6666667,
+    LocalTrailerCount: 0,
+    SpecialFeatureCount: 0,
+    LockData: false,
+    LockedFields: [],
+    ExternalUrls: [],
+    ProductionLocations: [],
+    RemoteTrailers: [],
+    Etag: getImageTag(row.Id) || "etag_123",
+    ImageBlurHashes: {},
     MediaSources: (isVideo || isAudio)
-      ? [buildMediaSource(row, parsed, isVideo, isAudio, container)]
+      ? [buildMediaSource(row, parsed, isVideo, isAudio, container, itemUuid)]
       : undefined,
     MediaStreams: parsed.MediaStreams,
   };
@@ -2681,12 +3050,12 @@ const imageHandler = async (c: any) => {
   }
 
   // 2. Library Cover
-  if (itemId.startsWith("view_")) {
-    const lib: any = await c.env.DB.prepare("SELECT * FROM Libraries WHERE Id = ?").bind(itemId).first();
-    if (lib && lib.PrimaryImageFileId) {
+  const lib: any = await resolveLibrary(c.env.DB, itemId);
+  if (lib) {
+    if (lib.PrimaryImageFileId) {
       return serveImageOrProxy(c, lib.PrimaryImageFileId, lib.Name, isBackdrop);
     }
-    return serveImageOrProxy(c, null, lib?.Name || itemId, isBackdrop);
+    return serveImageOrProxy(c, null, lib.Name || itemId, isBackdrop);
   }
 
   // 2.1 Person Images
@@ -2715,7 +3084,7 @@ const imageHandler = async (c: any) => {
     return serveImageOrProxy(c, null, itemId);
   }
 
-  const item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
+  const item: any = await resolveItem(c.env.DB, itemId);
   if (!item) {
     const tag = c.req.query("tag") || c.req.query("Tag");
     if (tag && (tag.startsWith("http://") || tag.startsWith("https://"))) {
@@ -2834,9 +3203,9 @@ app.get("/users/:userId/items/:itemId/images/:imageType/:index", imageHandler);
 
 const handleImageList = async (c: any) => {
   const itemId = c.req.param("itemId");
-  if (itemId.startsWith("view_")) {
-    const lib: any = await c.env.DB.prepare("SELECT * FROM Libraries WHERE Id = ?").bind(itemId).first();
-    if (lib && lib.PrimaryImageFileId) {
+  const lib: any = await resolveLibrary(c.env.DB, itemId);
+  if (lib) {
+    if (lib.PrimaryImageFileId) {
       return c.json([
         {
           ImageType: "Primary",
@@ -2851,7 +3220,7 @@ const handleImageList = async (c: any) => {
     }
     return c.json([]);
   }
-  const item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
+  const item: any = await resolveItem(c.env.DB, itemId);
   if (!item) return c.json([]);
   const images: any[] = [];
   if (item.PrimaryImageFileId) {
@@ -2972,7 +3341,7 @@ app.post("/Items/:itemId/RemoteImages/Download", async (c) => {
 
 const itemsHandler = async (c: any) => {
   const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || DEFAULT_ADMIN_ID;
-  const parentId = c.req.query("parentId") || c.req.query("ParentId");
+  let parentId = c.req.query("parentId") || c.req.query("ParentId");
   const ids = c.req.query("ids") || c.req.query("Ids");
   const includeItemTypes = getQueryArray(c, "includeItemTypes");
   const excludeItemTypes = getQueryArray(c, "excludeItemTypes");
@@ -2980,13 +3349,25 @@ const itemsHandler = async (c: any) => {
   const limit = parseInt(c.req.query("limit") || c.req.query("Limit") || "100");
   const startIndex = parseInt(c.req.query("startIndex") || c.req.query("StartIndex") || "0");
 
+  if (parentId) {
+    const lib = await resolveLibrary(c.env.DB, parentId);
+    if (lib) {
+      parentId = lib.Id;
+    } else {
+      const parentItem = await resolveItem(c.env.DB, parentId);
+      if (parentItem) {
+        parentId = parentItem.Id;
+      }
+    }
+  }
+
   let results: any[] = [];
 
   if (ids) {
-    const idList = ids.split(",");
+    const idList = ids.split(",").map((s: string) => s.trim()).filter(Boolean);
     const placeholders = idList.map(() => "?").join(",");
-    const query = await c.env.DB.prepare(`SELECT * FROM Items WHERE Id IN (${placeholders})`);
-    const { results: res } = await query.bind(...idList).all();
+    const query = await c.env.DB.prepare(`SELECT * FROM Items WHERE Id IN (${placeholders}) OR Uuid IN (${placeholders})`);
+    const { results: res } = await query.bind(...idList, ...idList).all();
     results = res;
   } else if (searchTerm) {
     const words = searchTerm.split(/\s+/).filter(Boolean);
@@ -3002,8 +3383,15 @@ const itemsHandler = async (c: any) => {
     sql += `(${wordClauses.join(" AND ")})`;
 
     if (parentId) {
-      sql += " AND (ParentId = ? OR LibraryId = ?)";
-      bindParams.push(parentId, parentId);
+      let realParentId = parentId;
+      const parentLib = await resolveLibrary(c.env.DB, parentId);
+      if (parentLib) realParentId = parentLib.Id;
+      else {
+        const parentItem = await resolveItem(c.env.DB, parentId);
+        if (parentItem) realParentId = parentItem.Id;
+      }
+      sql += " AND (ParentId = ? OR LibraryId = ? OR ParentId = ? OR LibraryId = ?)";
+      bindParams.push(realParentId, realParentId, parentId, parentId);
     }
 
     if (includeItemTypes.length > 0) {
@@ -3046,8 +3434,18 @@ const itemsHandler = async (c: any) => {
     const { results: res } = await c.env.DB.prepare(sql).bind(...bindParams).all();
     results = res;
   } else if (parentId) {
-    let sql = "SELECT * FROM Items WHERE (ParentId = ? OR LibraryId = ?)";
-    const bindParams: any[] = [parentId, parentId];
+    let realParentId = parentId;
+    const parentLib = await resolveLibrary(c.env.DB, parentId);
+    if (parentLib) {
+      realParentId = parentLib.Id;
+    } else {
+      const parentItem = await resolveItem(c.env.DB, parentId);
+      if (parentItem) {
+        realParentId = parentItem.Id;
+      }
+    }
+    let sql = "SELECT * FROM Items WHERE (ParentId = ? OR LibraryId = ? OR ParentId = ? OR LibraryId = ?)";
+    const bindParams: any[] = [realParentId, realParentId, parentId, parentId];
     if (includeItemTypes.length > 0) {
       const placeholders = includeItemTypes.map(() => "?").join(",");
       sql += ` AND Type IN (${placeholders})`;
@@ -3056,7 +3454,7 @@ const itemsHandler = async (c: any) => {
       const placeholders = excludeItemTypes.map(() => "?").join(",");
       sql += ` AND Type NOT IN (${placeholders})`;
       bindParams.push(...excludeItemTypes);
-    } else if (parentId.startsWith("view_")) {
+    } else if (realParentId.startsWith("view_")) {
       // Library root: only show Movie, Series, Audio (never loose Season or Episode)
       sql += " AND Type IN ('Movie', 'Series', 'Audio')";
     }
@@ -3139,13 +3537,16 @@ const itemsHandler = async (c: any) => {
     const overview = row.Overview || tmdb.overview || "";
     const communityRating = tmdb.rating || (isVideo || isSeries ? 7.0 : undefined);
     const genres = tmdb.genres || [];
-    const userData = buildUserData(row.Id, userDataMap.get(row.Id), parsed.RunTimeTicks);
+    const itemUuid = row.Uuid || toValidUuid(row.Id);
+    const parentUuid = row.ParentId ? toValidUuid(row.ParentId) : (row.LibraryId ? toValidUuid(row.LibraryId) : undefined);
+    const userData = buildUserData(itemUuid, userDataMap.get(row.Id) || userDataMap.get(itemUuid), parsed.RunTimeTicks);
     const hasImage = !!(row.PrimaryImageFileId || row.BackdropImageFileId);
 
     return {
       Name: cleanName,
       ServerId: SERVER_ID,
-      Id: row.Id,
+      Id: itemUuid,
+      ParentId: parentUuid,
       HasSubtitles: parsed.MediaStreams.some((s: any) => s.Type === "Subtitle"),
       Container: container,
       PremiereDate: premiereDate,
@@ -3174,6 +3575,9 @@ const itemsHandler = async (c: any) => {
       AlbumId: isAudio ? "album_view_musicas" : undefined,
       AlbumArtist: isAudio ? "Vários Artistas" : undefined,
       AlbumArtists: isAudio ? [{ Name: "Vários Artistas", Id: "artist_varios" }] : undefined,
+      MediaSources: (isVideo || isAudio)
+        ? [buildMediaSource(row, parsed, isVideo, isAudio, container, itemUuid)]
+        : undefined,
     };
   });
 
@@ -3189,88 +3593,43 @@ app.get("/items", itemsHandler);
 app.get("/Users/:userId/Items", itemsHandler);
 app.get("/users/:userId/items", itemsHandler);
 
-app.get("/shows/:itemId/seasons", async (c) => {
+const handleShowsSeasons = async (c: any) => {
   const itemId = c.req.param("itemId");
-  let item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
-  let seriesId = itemId;
+  let item: any = await resolveItem(c.env.DB, itemId);
+  let seriesId = item ? item.Id : itemId;
   let series: any = item;
   if (item && item.Type === "Season") {
     seriesId = item.ParentId;
-    series = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(seriesId).first();
+    series = await resolveItem(c.env.DB, seriesId);
   }
+  const seriesUuid = series ? (series.Uuid || toValidUuid(series.Id)) : toValidUuid(seriesId);
   const seriesName = series ? series.Name : "Series";
   const { results } = await c.env.DB.prepare(
     "SELECT * FROM Items WHERE ParentId = ? AND Type = 'Season' ORDER BY IndexNumber ASC"
   ).bind(seriesId).all();
-  const items = results.map((row: any) => ({
-    Name: row.Name,
-    ServerId: SERVER_ID,
-    Id: row.Id,
-    Type: "Season",
-    IsFolder: true,
-    IndexNumber: row.IndexNumber || 1,
-    SeriesName: seriesName,
-    SeriesId: seriesId,
-    ParentId: seriesId,
-    ParentBackdropItemId: seriesId,
-    ParentBackdropImageTags: series?.BackdropImageFileId ? ["cached"] : ["backdrop"],
-    ParentPrimaryImageItemId: seriesId,
-    ParentPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : "poster",
-    SeriesPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : "poster",
-    ImageTags: { Primary: row.PrimaryImageFileId ? "cached" : (series?.PrimaryImageFileId ? "cached" : "poster") },
-    BackdropImageTags: row.BackdropImageFileId ? ["cached"] : (series?.BackdropImageFileId ? ["cached"] : ["backdrop"]),
-    LocationType: "FileSystem",
-    MediaType: "Unknown",
-    UserData: {
-      PlayedPercentage: 0,
-      UnplayedItemCount: 10,
-      PlaybackPositionTicks: 0,
-      PlayCount: 0,
-      IsFavorite: false,
-      Played: false,
-      Key: row.Id,
-      ItemId: row.Id,
-    },
-  }));
-  return c.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 });
-});
-app.get("/Shows/:itemId/Seasons", async (c) => {
-  const itemId = c.req.param("itemId");
-  let item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
-  let seriesId = itemId;
-  let series: any = item;
-  if (item && item.Type === "Season") {
-    seriesId = item.ParentId;
-    series = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(seriesId).first();
-  }
-  const seriesName = series ? series.Name : "Series";
-
-  const { results } = await c.env.DB.prepare(
-    "SELECT * FROM Items WHERE ParentId = ? AND Type = 'Season' ORDER BY IndexNumber ASC"
-  )
-    .bind(seriesId)
-    .all();
 
   const items = results.map((row: any) => {
+    const seasonUuid = row.Uuid || toValidUuid(row.Id);
     return {
       Name: row.Name,
       ServerId: SERVER_ID,
-      Id: row.Id,
+      Id: seasonUuid,
       Type: "Season",
       IsFolder: true,
       IndexNumber: row.IndexNumber || 1,
       SeriesName: seriesName,
-      SeriesId: seriesId,
-      ParentId: seriesId,
-      ParentBackdropItemId: seriesId,
+      SeriesId: seriesUuid,
+      ParentId: seriesUuid,
+      ParentBackdropItemId: seriesUuid,
       ParentBackdropImageTags: series?.BackdropImageFileId ? ["cached"] : ["backdrop"],
-      ParentPrimaryImageItemId: seriesId,
+      ParentPrimaryImageItemId: seriesUuid,
       ParentPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : "poster",
       SeriesPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : "poster",
       ImageTags: { Primary: row.PrimaryImageFileId ? "cached" : (series?.PrimaryImageFileId ? "cached" : "poster") },
       BackdropImageTags: row.BackdropImageFileId ? ["cached"] : (series?.BackdropImageFileId ? ["cached"] : ["backdrop"]),
       LocationType: "FileSystem",
       MediaType: "Unknown",
+      DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
       UserData: {
         PlayedPercentage: 0,
         UnplayedItemCount: 10,
@@ -3278,40 +3637,49 @@ app.get("/Shows/:itemId/Seasons", async (c) => {
         PlayCount: 0,
         IsFavorite: false,
         Played: false,
-        Key: row.Id,
-        ItemId: row.Id,
+        Key: seasonUuid,
+        ItemId: seasonUuid,
       },
     };
   });
   return c.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 });
-});
+};
 
-app.get("/Shows/:itemId/Episodes", async (c) => {
+app.get("/Shows/:itemId/Seasons", handleShowsSeasons);
+app.get("/shows/:itemId/seasons", handleShowsSeasons);
+
+const handleShowsEpisodes = async (c: any) => {
   const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || DEFAULT_ADMIN_ID;
   const itemId = c.req.param("itemId"); // series id or season id
-  const seasonId = c.req.query("seasonId") || c.req.query("SeasonId");
+  const rawSeasonId = c.req.query("seasonId") || c.req.query("SeasonId");
 
-  let item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
-  let seriesId = itemId;
+  let item: any = await resolveItem(c.env.DB, itemId);
+  let seriesId = item ? item.Id : itemId;
   let series: any = item;
   if (item && item.Type === "Season") {
     seriesId = item.ParentId;
-    series = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(seriesId).first();
+    series = await resolveItem(c.env.DB, seriesId);
   }
+  const seriesUuid = series ? (series.Uuid || toValidUuid(series.Id)) : toValidUuid(seriesId);
   const seriesName = series ? series.Name : "Series";
 
   let results: any[] = [];
   let seasonMap = new Map<string, any>();
-  if (seasonId && seasonId !== "undefined") {
+  let realSeasonId = rawSeasonId;
+  if (rawSeasonId && rawSeasonId !== "undefined") {
+    const sRow = await resolveItem(c.env.DB, rawSeasonId);
+    if (sRow) {
+      realSeasonId = sRow.Id;
+      seasonMap.set(sRow.Id, sRow);
+      seasonMap.set(rawSeasonId, sRow);
+    }
     results = (
       await c.env.DB.prepare(
         "SELECT * FROM Items WHERE ParentId = ? AND Type IN ('Episode', 'Audio') ORDER BY IndexNumber ASC",
       )
-        .bind(seasonId)
+        .bind(realSeasonId)
         .all()
     ).results;
-    const sRow = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(seasonId).first();
-    if (sRow) seasonMap.set(seasonId, sRow);
   } else {
     results = (
       await c.env.DB.prepare(
@@ -3326,23 +3694,45 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
   let tmdbSeasonEpMap: Map<number, any> | null = null;
   if (series && series.TmdbId) {
     let seasonNum = 1;
-    if (seasonId && seasonId !== "undefined") {
-      const sRow = seasonMap.get(seasonId) || await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(seasonId).first();
+    if (realSeasonId && realSeasonId !== "undefined") {
+      const sRow = seasonMap.get(realSeasonId) || await resolveItem(c.env.DB, realSeasonId);
       if (sRow) seasonNum = sRow.IndexNumber || 1;
     }
     tmdbSeasonEpMap = await getTvSeasonEpisodes(c.env.TMDB_API_KEY, parseInt(series.TmdbId), seasonNum);
   }
 
+  const totalRecordCount = results.length;
+
+  // Tratar startItemId: cliente Android pede startItemId para iniciar lista no episódio clicado
+  const startItemId = c.req.query("startItemId") || c.req.query("StartItemId");
+  if (startItemId) {
+    const sIdx = results.findIndex((r: any) => r.Id === startItemId || (r.Uuid && r.Uuid === startItemId) || toValidUuid(r.Id) === startItemId);
+    if (sIdx >= 0) {
+      results = results.slice(sIdx);
+    }
+  }
+
+  // Tratar limit
+  const limitParam = c.req.query("limit") || c.req.query("Limit");
+  if (limitParam) {
+    const lim = parseInt(limitParam);
+    if (!isNaN(lim) && lim > 0) {
+      results = results.slice(0, lim);
+    }
+  }
+
   const itemIds = results.map((r: any) => r.Id);
   const userDataMap = await fetchUserItemDataMap(c.env.DB, userId, itemIds);
+
+  const seriesYear = series?.ProductionYear || 2024;
+  const seriesPremiere = series?.PremiereDate || `${seriesYear}-01-01T00:00:00.0000000Z`;
 
   const items = results.map((row: any) => {
     const parsed = parseMediaInfo(row);
     const isAudio = row.Type === "Audio";
     const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
-    const url = new URL(c.req.url);
-    const origin = `${url.protocol}//${url.host}`;
-    const streamUrl = isAudio ? `${origin}/Audio/${row.Id}/universal` : `${origin}/Videos/${row.Id}/stream.${container}`;
+    const epUuid = row.Uuid || toValidUuid(row.Id);
+    const seasonUuid = row.ParentId ? toValidUuid(row.ParentId) : undefined;
 
     let epName = cleanEpisodeTitle(row.Name, row.IndexNumber);
     let epOverview = row.Overview || "";
@@ -3364,17 +3754,16 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
       }
     }
 
-    const hasAnyImage = !!(epImage || series?.BackdropImageFileId || series?.PrimaryImageFileId);
-    const userData = buildUserData(row.Id, userDataMap.get(row.Id), parsed.RunTimeTicks);
+    const userData = buildUserData(epUuid, userDataMap.get(row.Id) || userDataMap.get(epUuid), parsed.RunTimeTicks);
 
     return {
       Name: epName,
       ServerId: SERVER_ID,
-      Id: row.Id,
-      ParentId: row.ParentId,
-      SeriesId: seriesId,
+      Id: epUuid,
+      ParentId: seasonUuid,
+      SeriesId: seriesUuid,
       SeriesName: seriesName,
-      SeasonId: row.ParentId,
+      SeasonId: seasonUuid,
       SeasonName: `Temporada ${row.ParentIndexNumber || 1}`,
       IsFolder: false,
       Type: row.Type,
@@ -3388,10 +3777,10 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
       Overview: epOverview,
       PrimaryImageTag: "cached",
       ImageTags: { Primary: "cached" },
-      ParentPrimaryImageItemId: seriesId,
+      ParentPrimaryImageItemId: seriesUuid,
       ParentPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : undefined,
       SeriesPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : undefined,
-      ParentBackdropItemId: seriesId,
+      ParentBackdropItemId: seriesUuid,
       ParentBackdropImageTags: series?.BackdropImageFileId ? ["cached"] : undefined,
       LocationType: "FileSystem",
       UserData: userData,
@@ -3402,12 +3791,35 @@ app.get("/Shows/:itemId/Episodes", async (c) => {
       Album: isAudio ? "Músicas" : undefined,
       AlbumId: isAudio ? "album_view_musicas" : undefined,
       AlbumArtist: isAudio ? "Vários Artistas" : undefined,
-      AlbumArtists: isAudio ? [{ Name: "Vários Artistas", Id: "artist_varios" }] : undefined,
-      MediaSources: [buildMediaSource(row, parsed, !isAudio, isAudio, container)]
+      CanDownload: false,
+      CanDelete: false,
+      Chapters: [],
+      Trickplay: {},
+      ChannelId: null,
+      EnableMediaSourceDisplay: true,
+      Etag: getImageTag(row.Id) || "etag_123",
+      ImageBlurHashes: {},
+      MediaSources: [buildMediaSource(row, parsed, !isAudio, isAudio, container, epUuid)],
+      MediaStreams: parsed.MediaStreams,
+      Width: parsed.Width,
+      Height: parsed.Height,
+      ProductionYear: seriesYear,
+      PremiereDate: seriesPremiere,
+      CommunityRating: 7.0,
+      BackdropImageTags: [],
+      SortName: (cleanMediaTitle(epName).query || epName).toLowerCase(),
+      OriginalTitle: epName,
+      DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
+      DateCreated: row.DateCreated ? `${String(row.DateCreated).replace(" ", "T")}.0000000Z` : "2024-01-01T00:00:00.0000000Z",
+      Path: row.FileId ? `/media/${row.Name}` : undefined,
+      SeriesStudio: "",
     };
   });
-  return c.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 });
-});
+  return c.json({ Items: items, TotalRecordCount: totalRecordCount, StartIndex: 0 });
+};
+
+app.get("/Shows/:itemId/Episodes", handleShowsEpisodes);
+app.get("/shows/:itemId/episodes", handleShowsEpisodes);
 
 // Studios endpoint
 app.get("/Studios", async (c) => {
@@ -3708,15 +4120,19 @@ app.post("/Items/RemoteSearch/Apply/:itemId", async (c) => {
 
 
 // Shows NextUp endpoint
-app.get("/Shows/NextUp", async (c) => {
+const handleNextUp = async (c: any) => {
   const userId = c.req.param("userId") || c.req.query("userId") || c.req.query("UserId") || DEFAULT_ADMIN_ID;
-  const seriesId = c.req.query("seriesId") || c.req.query("SeriesId");
+  const rawSeriesId = c.req.query("seriesId") || c.req.query("SeriesId");
   let series: any = null;
+  let seriesId = rawSeriesId;
   let tmdbSeasonEpMap: Map<number, any> | null = null;
-  if (seriesId) {
-    series = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(seriesId).first();
-    if (series && series.TmdbId) {
-      tmdbSeasonEpMap = await getTvSeasonEpisodes(c.env.TMDB_API_KEY, parseInt(series.TmdbId), 1);
+  if (rawSeriesId) {
+    series = await resolveItem(c.env.DB, rawSeriesId);
+    if (series) {
+      seriesId = series.Id;
+      if (series.TmdbId) {
+        tmdbSeasonEpMap = await getTvSeasonEpisodes(c.env.TMDB_API_KEY, parseInt(series.TmdbId), 1);
+      }
     }
   }
 
@@ -3739,17 +4155,17 @@ app.get("/Shows/NextUp", async (c) => {
     const parsed = parseMediaInfo(row);
     let sRow = series;
     if (!sRow) {
-      const season: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(row.ParentId).first();
+      const season: any = await resolveItem(c.env.DB, row.ParentId);
       if (season) {
         if (!seriesCache.has(season.ParentId)) {
-          const s = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(season.ParentId).first();
+          const s = await resolveItem(c.env.DB, season.ParentId);
           if (s) seriesCache.set(season.ParentId, s);
         }
         sRow = seriesCache.get(season.ParentId);
       }
     }
 
-    const sId = sRow?.Id || seriesId;
+    const sUuid = sRow ? (sRow.Uuid || toValidUuid(sRow.Id)) : (seriesId ? toValidUuid(seriesId) : undefined);
     const sName = sRow?.Name;
     const sPoster = sRow?.PrimaryImageFileId;
     const sBackdrop = sRow?.BackdropImageFileId;
@@ -3777,17 +4193,19 @@ app.get("/Shows/NextUp", async (c) => {
       }
     }
 
-    const hasAnyImage = !!(epImage || sBackdrop || sPoster);
-    const userData = buildUserData(row.Id, userDataMap.get(row.Id), parsed.RunTimeTicks);
+    const epUuid = row.Uuid || toValidUuid(row.Id);
+    const seasonUuid = row.ParentId ? toValidUuid(row.ParentId) : undefined;
+    const userData = buildUserData(epUuid, userDataMap.get(row.Id) || userDataMap.get(epUuid), parsed.RunTimeTicks);
+    const container = row.Name.endsWith(".mkv") ? "mkv" : "mp4";
 
     return {
       Name: epName,
       ServerId: SERVER_ID,
-      Id: row.Id,
+      Id: epUuid,
       Type: "Episode",
-      SeriesId: sId,
+      SeriesId: sUuid,
       SeriesName: sName,
-      SeasonId: row.ParentId,
+      SeasonId: seasonUuid,
       SeasonName: `Temporada ${row.ParentIndexNumber || 1}`,
       IndexNumber: row.IndexNumber || 1,
       ParentIndexNumber: row.ParentIndexNumber || 1,
@@ -3798,34 +4216,41 @@ app.get("/Shows/NextUp", async (c) => {
       PrimaryImageTag: "cached",
       ImageTags: { Primary: "cached" },
       SeriesPrimaryImageTag: sPoster ? "cached" : undefined,
-      ParentPrimaryImageItemId: sId,
+      ParentPrimaryImageItemId: sUuid,
       ParentPrimaryImageTag: sPoster ? "cached" : undefined,
-      ParentBackdropItemId: sId,
+      ParentBackdropItemId: sUuid,
       ParentBackdropImageTags: sBackdrop ? ["cached"] : undefined,
       UserData: userData,
+      DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
+      MediaSources: [buildMediaSource(row, parsed, true, false, container, epUuid)],
     };
   }));
 
   return c.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 });
-});
+};
+
+app.get("/Shows/NextUp", handleNextUp);
+app.get("/shows/nextup", handleNextUp);
 
 // LiveTv mocks to avoid 404s
 app.get("/LiveTv/*", (c) => c.json({ Items: [], TotalRecordCount: 0, StartIndex: 0 }));
 
 const handlePlaybackInfo = async (c: any) => {
-  const itemId = c.req.param("itemId");
   let body: any = {};
   if (c.req.method === "POST") {
     try {
       body = await c.req.json();
     } catch (e) {}
   }
-  const mediaSourceId = c.req.query("mediaSourceId") || c.req.query("MediaSourceId") || body.MediaSourceId || body.Id;
-  const targetId = itemId || mediaSourceId;
+  const paramId = c.req.param("itemId");
+  const queryId = c.req.query("Id") || c.req.query("id") || c.req.query("itemId") || c.req.query("ItemId");
+  const bodyId = body.Id || body.id || body.ItemId || body.itemId;
+  const mediaSourceId = c.req.query("mediaSourceId") || c.req.query("MediaSourceId") || body.MediaSourceId || body.mediaSourceId;
+  const targetId = paramId || queryId || bodyId || mediaSourceId;
 
-  let row = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(targetId).first();
-  if (!row && mediaSourceId) {
-    row = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(mediaSourceId).first();
+  let row = await resolveItem(c.env.DB, targetId);
+  if (!row && mediaSourceId && mediaSourceId !== targetId) {
+    row = await resolveItem(c.env.DB, mediaSourceId);
   }
   if (!row) return c.notFound();
 
@@ -3833,16 +4258,12 @@ const handlePlaybackInfo = async (c: any) => {
   const isAudio = row.Type === "Audio";
   const parsed = parseMediaInfo(row);
   const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
-  
-  const url = new URL(c.req.url);
-  const origin = `${url.protocol}//${url.host}`;
-  const streamPath = isAudio ? `/Audio/${row.Id}/universal` : `/Videos/${row.Id}/stream.${container}`;
-  const fullStreamUrl = `${origin}${streamPath}`;
+  const effectiveMediaSourceId = mediaSourceId || row.Uuid || toValidUuid(row.Id);
 
   return c.json({
     PlaySessionId: toValidUuid("playsession_" + row.Id),
     MediaSources: [
-      buildMediaSource(row, parsed, isVideo, isAudio, container)
+      buildMediaSource(row, parsed, isVideo, isAudio, container, effectiveMediaSourceId)
     ],
   });
 };
@@ -3851,6 +4272,10 @@ app.get("/Items/:itemId/PlaybackInfo", handlePlaybackInfo);
 app.post("/Items/:itemId/PlaybackInfo", handlePlaybackInfo);
 app.get("/items/:itemId/playbackinfo", handlePlaybackInfo);
 app.post("/items/:itemId/playbackinfo", handlePlaybackInfo);
+app.get("/Items/PlaybackInfo", handlePlaybackInfo);
+app.post("/Items/PlaybackInfo", handlePlaybackInfo);
+app.get("/items/playbackinfo", handlePlaybackInfo);
+app.post("/items/playbackinfo", handlePlaybackInfo);
 app.get("/Users/:userId/Items/:itemId/PlaybackInfo", handlePlaybackInfo);
 app.post("/Users/:userId/Items/:itemId/PlaybackInfo", handlePlaybackInfo);
 app.get("/users/:userId/items/:itemId/playbackinfo", handlePlaybackInfo);
@@ -3872,13 +4297,9 @@ const streamHandler = async (c: any) => {
       ext = path.toLowerCase().includes("audio") ? "mp3" : "mp4";
     }
 
-    let item = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?")
-      .bind(targetId)
-      .first();
+    let item = await resolveItem(c.env.DB, targetId);
     if (!item && mediaSourceId && mediaSourceId !== targetId) {
-      item = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?")
-        .bind(mediaSourceId)
-        .first();
+      item = await resolveItem(c.env.DB, mediaSourceId);
     }
     if (!item || !item.FileId) {
       return c.text("Item not found", 404);
@@ -4087,16 +4508,20 @@ app.post("/Items/:itemId/Images/:imageType/Delete", handleImageDelete);
 app.post("/Items/:itemId/Images/:imageType/:index/Delete", handleImageDelete);
 
 // Subtitles routes
-app.all("/Videos/:itemId/:mediaSourceId/Subtitles/:index/*", (c) => {
+const handleSubtitles = (c: any) => {
   return new Response("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n...\n", {
     headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*" },
   });
-});
-app.all("/Videos/:itemId/Subtitles/:index/*", (c) => {
-  return new Response("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n...\n", {
-    headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*" },
-  });
-});
+};
+app.all("/Videos/:itemId/:mediaSourceId/Subtitles/:index/*", handleSubtitles);
+app.all("/videos/:itemId/:mediaSourceId/Subtitles/:index/*", handleSubtitles);
+app.all("/videos/:itemId/:mediaSourceId/subtitles/:index/*", handleSubtitles);
+app.all("/Videos/:itemId/Subtitles/:index/*", handleSubtitles);
+app.all("/videos/:itemId/Subtitles/:index/*", handleSubtitles);
+app.all("/videos/:itemId/subtitles/:index/*", handleSubtitles);
+app.all("/Videos/:itemId/Subtitles*", handleSubtitles);
+app.all("/videos/:itemId/subtitles*", handleSubtitles);
+
 
 export default {
   fetch: app.fetch,

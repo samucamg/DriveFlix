@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./assets/logo.png" alt="DriveFlix Logo" width="180" />
+  <img src="./assets/logo.png" alt="DriveFlin Logo" width="180" />
 </p>
 
-<h1 align="center">DriveFlix</h1>
+<h1 align="center">DriveFlin</h1>
 
 <p align="center">
   <strong>Serverless Jellyfin Backend Powered by Google Drive & Cloudflare Workers</strong>
@@ -19,9 +19,9 @@
 
 ---
 
-## 🌟 O que é o DriveFlix?
+## 🌟 O que é o DriveFlin?
 
-O **DriveFlix** é uma implementação **100% Serverless** do backend do **Jellyfin**, projetada para rodar inteiramente no **Cloudflare Workers** com persistência no **Cloudflare D1** (SQLite distribuído) e armazenamento de mídia no **Google Drive**.
+O **DriveFlin** é uma implementação **100% Serverless** do backend do **Jellyfin**, projetada para rodar inteiramente no **Cloudflare Workers** com persistência no **Cloudflare D1** (SQLite distribuído) e armazenamento de mídia no **Google Drive**.
 
 Ele elimina a necessidade de manter servidores dedicados, computadores ligados 24 horas por dia ou VPS pagas. Você obtém uma experiência completa de streaming estilo **Netflix**, com metadados do TMDB, capas em alta definição, suporte a dual áudio e legendas, direto do seu Google Drive e com **custo zero de hospedagem**.
 
@@ -46,7 +46,7 @@ Ele elimina a necessidade de manter servidores dedicados, computadores ligados 2
 
 ```mermaid
 graph TD
-    Client[Jellyfin Web Client / Apps / Chromecast] -->|HTTP / HTTPS| Worker[Cloudflare Worker: DriveFlix API]
+    Client[Jellyfin Web Client / Apps / Chromecast] -->|HTTP / HTTPS| Worker[Cloudflare Worker: DriveFlin API]
     Worker -->|Metadados e Estado| D1[(Cloudflare D1 Database)]
     Worker -->|Busca de Informações| TMDB[The Movie Database API]
     Worker -->|Range Requests 206 Direct Stream| GDrive[Google Drive API v3]
@@ -59,7 +59,7 @@ graph TD
 
 ## ⚠️ Limitações e Escolhas de Design (Direct Play Only)
 
-Por ser uma aplicação serverless executada em ambientes V8 isolados no edge da Cloudflare, o DriveFlix adota o modelo **Direct Play / Direct Stream**:
+Por ser uma aplicação serverless executada em ambientes V8 isolados no edge da Cloudflare, o DriveFlin adota o modelo **Direct Play / Direct Stream**:
 
 1. **Sem Transcodificação em Tempo Real com FFmpeg:** O Cloudflare Workers possui limite de CPU por requisição e não suporta a execução de binários como o `ffmpeg`. Todo o conteúdo é transmitido diretamente em seu formato original.
 2. **Formatos Recomendados:** Para compatibilidade nativa com navegadores, Smart TVs e Chromecast, utilize:
@@ -71,12 +71,12 @@ Por ser uma aplicação serverless executada em ambientes V8 isolados no edge da
 
 ## 🚀 Estratégia e Guia de Deploy
 
-A forma recomendada para utilizar o **DriveFlix** é através do **Fork no GitHub**. Dessa forma, seu projeto permanece conectado ao repositório oficial e você recebe todas as atualizações com apenas um clique em **"Sync Fork"**.
+A forma recomendada para utilizar o **DriveFlin** é através do **Fork no GitHub**. Dessa forma, seu projeto permanece conectado ao repositório oficial e você recebe todas as atualizações com apenas um clique em **"Sync Fork"**.
 
 ### Método Recomendado: Fork + GitHub Actions
 
 #### 1. Faça o Fork do Repositório
-Clique no botão **Fork** no topo desta página (`https://github.com/samucamg/DriveFlix`) para criar uma cópia em sua conta do GitHub.
+Clique no botão **Fork** no topo desta página (`https://github.com/samucamg/DriveFlin`) para criar uma cópia em sua conta do GitHub.
 
 #### 2. Crie as Credenciais do Google Cloud Console
 1. Acesse o [Google Cloud Console](https://console.cloud.google.com/).
@@ -94,17 +94,17 @@ No terminal da sua máquina (ou via GitHub Codespaces):
 
 ```bash
 # Clone seu fork
-git clone https://github.com/SEU_USUARIO/DriveFlix.git
-cd DriveFlix
+git clone https://github.com/SEU_USUARIO/DriveFlin.git
+cd DriveFlin
 
 # Instale as dependências
 npm install
 
 # Crie seu banco de dados no Cloudflare D1
-npx wrangler d1 create driveflix_db
+npx wrangler d1 create driveflin_db
 
 # Inicialize as tabelas
-npx wrangler d1 execute driveflix_db --remote --file=schema.sql
+npx wrangler d1 execute driveflin_db --remote --file=schema.sql
 ```
 
 Adicione o `database_id` gerado no seu arquivo `wrangler.toml`:
@@ -112,7 +112,7 @@ Adicione o `database_id` gerado no seu arquivo `wrangler.toml`:
 ```toml
 [[d1_databases]]
 binding = "DB"
-database_name = "driveflix_db"
+database_name = "driveflin_db"
 database_id = "SEU_DATABASE_ID_AQUI"
 ```
 
@@ -140,11 +140,11 @@ Pronto! Acesse a URL gerada pelo Cloudflare Workers (ou vincule seu domínio per
 
 ## 📦 Como Fazer Backup e Restauração
 
-O DriveFlix possui suporte nativo à cópia de segurança pelo painel do Jellyfin:
+O DriveFlin possui suporte nativo à cópia de segurança pelo painel do Jellyfin:
 
 1. Acesse **Administração > Backups** (`#/dashboard/backups`).
 2. Clique em **Criar backup**. O sistema exportará todas as bibliotecas, metadados e histórico de reprodução em um arquivo JSON e salvará automaticamente:
-   - Na pasta `DriveFlix_Backups` do seu Google Drive.
+   - Na pasta `DriveFlin_Backups` do seu Google Drive.
    - Na tabela de segurança local do Cloudflare D1.
 3. Para restaurar, basta clicar no ícone de **Restaurar** ao lado do backup desejado.
 

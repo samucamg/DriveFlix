@@ -269,7 +269,7 @@ export const oauthHtml = `<!DOCTYPE html>
     <div class="header">
       <div>
         <a href="https://driveflin.org">
-          <img class="brand-logo" src="/assets/img/DriveFlin.png" alt="DriveFlin" onerror="this.src='https://raw.githubusercontent.com/samucamg/DriveFlix/main/assets/driveflin-web-assets/DriveFlin.png'">
+          <img class="brand-logo" src="/assets/img/DriveFlin.png" alt="DriveFlin" onerror="this.src='https://raw.githubusercontent.com/samucamg/DriveFlin/main/assets/driveflin-web-assets/DriveFlin.png'">
         </a>
       </div>
       <div class="logo-text">🎬 Drive<span>Flin</span> Generator</div>
@@ -369,7 +369,7 @@ export const oauthHtml = `<!DOCTYPE html>
       <a href="https://driveflin.org" target="_blank">← Ir para driveflin.org</a> &nbsp;•&nbsp; 
       <a href="/web/index.html">Interface do Jellyfin</a> &nbsp;•&nbsp; 
       <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console ↗</a> &nbsp;•&nbsp; 
-      <a href="https://github.com/samucamg/DriveFlix" target="_blank">GitHub ↗</a>
+      <a href="https://github.com/samucamg/DriveFlin" target="_blank">GitHub ↗</a>
     </div>
   </div>
 

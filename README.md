@@ -1,7 +1,7 @@
-# 🎬 DriveFlix — Serverless Jellyfin on Cloudflare Workers & Google Drive
+# 🎬 DriveFlin — Serverless Jellyfin on Cloudflare Workers & Google Drive
 
 <p align="center">
-  <img src="assets/DriveFlin.png" alt="DriveFlix Logo" width="320"/>
+  <img src="assets/DriveFlin.png" alt="DriveFlin Logo" width="320"/>
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/samucamg/DriveFlix" target="_blank">
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/samucamg/DriveFlin" target="_blank">
     <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" height="38"/>
   </a>
 </p>
@@ -25,9 +25,9 @@
 
 ## 📌 Visão Geral / Overview
 
-**DriveFlix** é uma implementação completa e serverless do backend do **Jellyfin**, projetada para rodar nativamente sobre a infraestrutura global da **Cloudflare** (Workers + D1 SQL + Assets) consumindo arquivos de mídia diretamente do **Google Drive** (Pessoal ou Shared Drives/Team Drives).
+**DriveFlin** é uma implementação completa e serverless do backend do **Jellyfin**, projetada para rodar nativamente sobre a infraestrutura global da **Cloudflare** (Workers + D1 SQL + Assets) consumindo arquivos de mídia diretamente do **Google Drive** (Pessoal ou Shared Drives/Team Drives).
 
-Com o DriveFlix, você tem todos os recursos do Jellyfin — interface web moderna com tema Netflix (JellyFlix), busca inteligente de filmes e séries, metadados automáticos do TMDB, suporte a legendas e dual áudio, transmissão para Chromecast e recuperação de backups — com **custo zero de servidor** e alta disponibilidade mundial.
+Com o DriveFlin, você tem todos os recursos do Jellyfin — interface web moderna com tema Netflix (JellyFlix), busca inteligente de filmes e séries, metadados automáticos do TMDB, suporte a legendas e dual áudio, transmissão para Chromecast e recuperação de backups — com **custo zero de servidor** e alta disponibilidade mundial.
 
 ---
 
@@ -38,7 +38,7 @@ Com o DriveFlix, você tem todos os recursos do Jellyfin — interface web moder
 - 🗂️ **Navegação de Pastas no Painel de Controle**: Ao criar ou editar uma biblioteca de mídia, navegue pelas pastas do Google Drive diretamente na janela do Jellyfin.
 - 💾 **Sistema Completo de Backup & Restauração**:
   - Exportação em 1 clique de todas as tabelas (Bibliotecas, Itens, Progresso e Configurações).
-  - Persistência dupla: salva os backups na pasta `DriveFlix_Backups` do seu Google Drive e na tabela interna do Cloudflare D1.
+  - Persistência dupla: salva os backups na pasta `DriveFlin_Backups` do seu Google Drive e na tabela interna do Cloudflare D1.
   - Restauração instantânea para fácil migração.
 - 🎨 **Interface Netflix Premium (JellyFlix)**: Jellyfin Web oficial pré-configurado com tema escuro estilo Netflix, fontes modernas, cartazes em alta definição e logos originais.
 - 📺 **Transmissão para Chromecast & Smart TVs**:
@@ -60,7 +60,7 @@ flowchart TD
     User["👤 Usuário (Navegador / App / Chromecast)"]
     
     subgraph Cloudflare["☁️ Cloudflare Edge Network"]
-        Worker["⚡ DriveFlix Worker (Hono Framework)"]
+        Worker["⚡ DriveFlin Worker (Hono Framework)"]
         D1[("🗄️ Cloudflare D1 (SQLite Database)")]
         Assets["📦 Jellyfin Web Frontend (Static Assets)"]
         Cron["⏰ Cron Trigger (1h)"]
@@ -94,8 +94,8 @@ flowchart TD
 
 ### 1. Clonar o Repositório
 ```bash
-git clone https://github.com/samucamg/DriveFlix.git
-cd DriveFlix
+git clone https://github.com/samucamg/DriveFlin.git
+cd DriveFlin
 ```
 
 ### 2. Instalar Dependências
@@ -160,10 +160,10 @@ Pronto! Seu servidor Jellyfin estará online e acessível no endereço fornecido
    - Clique em **+ Adicionar Biblioteca de Mídia**.
    - Escolha o tipo de conteúdo (Filmes, Séries, Música).
    - Ao adicionar uma pasta, use o seletor visual do Google Drive ou insira diretamente o ID da pasta do Google Drive.
-   - O DriveFlix iniciará a sincronização e o enriquecimento de metadados automaticamente em segundo plano.
+   - O DriveFlin iniciará a sincronização e o enriquecimento de metadados automaticamente em segundo plano.
 3. **Criar e Restaurar Backups**:
    - Acesse **Painel de Controle** -> **Backups**.
-   - Clique em **Criar backup** para gerar um arquivo `.json` completo salvo no seu Google Drive (`DriveFlix_Backups`) e no Cloudflare D1.
+   - Clique em **Criar backup** para gerar um arquivo `.json` completo salvo no seu Google Drive (`DriveFlin_Backups`) e no Cloudflare D1.
    - Clique no botão de restauração em qualquer backup da lista para recuperar instantaneamente seu servidor.
 
 ---

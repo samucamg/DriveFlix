@@ -1,5 +1,6 @@
 import { GoogleDrive } from './gdrive';
 import { Cipher } from '@fyears/rclone-crypt';
+import { toValidUuid } from './index';
 
 export async function runSync(env: any) {
   const gdrive = new GoogleDrive(env);
@@ -34,11 +35,12 @@ export async function runSync(env: any) {
             let name = sub.name;
             try { name = await rc.decryptFileName(sub.name); } catch(e) {}
             if (name.endsWith('.mp4') || name.endsWith('.mkv') || name.endsWith('.avi')) {
+              const rowId = `movie_${sub.id}`;
               await env.DB.prepare(`
-                INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size)
-                VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?)
-                ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName
-              `).bind(`movie_${sub.id}`, libraryId, libraryId, name, sub.id, sub.name, sub.size || 0).run();
+                INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
+                VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?, ?)
+                ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
+              `).bind(rowId, libraryId, libraryId, name, sub.id, sub.name, sub.size || 0, toValidUuid(rowId)).run();
             }
           }
         } else {
@@ -46,11 +48,12 @@ export async function runSync(env: any) {
           let name = item.name;
           try { name = await rc.decryptFileName(item.name); } catch(e) {}
           if (name.endsWith('.mp4') || name.endsWith('.mkv') || name.endsWith('.avi')) {
+            const rowId = `movie_${item.id}`;
             await env.DB.prepare(`
-              INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size)
-              VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?)
-              ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName
-            `).bind(`movie_${item.id}`, libraryId, libraryId, name, item.id, item.name, item.size || 0).run();
+              INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
+              VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?, ?)
+              ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
+            `).bind(rowId, libraryId, libraryId, name, item.id, item.name, item.size || 0, toValidUuid(rowId)).run();
           }
         }
       }
@@ -69,9 +72,10 @@ export async function runSync(env: any) {
 
         const seriesId = `series_${seriesFolder.id}`;
         await env.DB.prepare(`
-          INSERT OR IGNORE INTO Items (Id, ParentId, LibraryId, Type, Name, FolderId)
-          VALUES (?, ?, ?, 'Series', ?, ?)
-        `).bind(seriesId, libraryId, libraryId, seriesName, seriesFolder.id).run();
+          INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FolderId, Uuid)
+          VALUES (?, ?, ?, 'Series', ?, ?, ?)
+          ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+        `).bind(seriesId, libraryId, libraryId, seriesName, seriesFolder.id, toValidUuid(seriesId)).run();
 
         // List contents of the series folder: Seasons or direct Episodes
         const seasonList: any = await gdrive.listFolder(seriesFolder.id);
@@ -86,10 +90,10 @@ export async function runSync(env: any) {
             const seasonId = `season_${seasonItem.id}`;
 
             await env.DB.prepare(`
-              INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId)
-              VALUES (?, ?, ?, 'Season', ?, ?, ?)
-              ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId
-            `).bind(seasonId, seriesId, libraryId, seasonName, seasonNumber, seasonItem.id).run();
+              INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId, Uuid)
+              VALUES (?, ?, ?, 'Season', ?, ?, ?, ?)
+              ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+            `).bind(seasonId, seriesId, libraryId, seasonName, seasonNumber, seasonItem.id, toValidUuid(seasonId)).run();
 
             // List episodes inside season
             const epList: any = await gdrive.listFolder(seasonItem.id);
@@ -98,20 +102,21 @@ export async function runSync(env: any) {
               let epName = ep.name;
               try { epName = await rc.decryptFileName(ep.name); } catch(e) {}
 
+              const rowEpId = `ep_${ep.id}`;
               if (epName.endsWith('.mp4') || epName.endsWith('.mkv')) {
                 const epMatch = epName.match(/(?:[Ss]\d+)?\s*[Ee](\d+)|\b\d+x(\d+)\b|\bEp[._\s]*(\d+)\b|(?:^|\D)(\d{1,3})\s*\./i);
                 const epNumber = epMatch ? parseInt(epMatch[1] || epMatch[2] || epMatch[3] || epMatch[4]) : 1;
                 await env.DB.prepare(`
-                  INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size)
-                  VALUES (?, ?, ?, 'Episode', ?, ?, ?, ?, ?, ?)
-                  ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size
-                `).bind(`ep_${ep.id}`, seasonId, libraryId, epName, epNumber, seasonNumber, ep.id, ep.name, ep.size || 0).run();
+                  INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size, Uuid)
+                  VALUES (?, ?, ?, 'Episode', ?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
+                `).bind(rowEpId, seasonId, libraryId, epName, epNumber, seasonNumber, ep.id, ep.name, ep.size || 0, toValidUuid(rowEpId)).run();
               } else if (epName.endsWith('.mp3') || epName.endsWith('.m4a') || epName.endsWith('.flac')) {
                 await env.DB.prepare(`
-                  INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size)
-                  VALUES (?, ?, ?, 'Audio', ?, ?, ?, ?, ?, ?)
-                  ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size
-                `).bind(`ep_${ep.id}`, seasonId, libraryId, epName, 1, seasonNumber, ep.id, ep.name, ep.size || 0).run();
+                  INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size, Uuid)
+                  VALUES (?, ?, ?, 'Audio', ?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
+                `).bind(rowEpId, seasonId, libraryId, epName, 1, seasonNumber, ep.id, ep.name, ep.size || 0, toValidUuid(rowEpId)).run();
               }
             }
           } else {
@@ -122,17 +127,19 @@ export async function runSync(env: any) {
             if (epName.endsWith('.mp4') || epName.endsWith('.mkv')) {
               const defaultSeasonId = `season_${seriesFolder.id}_s1`;
               await env.DB.prepare(`
-                INSERT OR IGNORE INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId)
-                VALUES (?, ?, ?, 'Season', 'Season 1', 1, ?)
-              `).bind(defaultSeasonId, seriesId, libraryId, seriesFolder.id).run();
+                INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId, Uuid)
+                VALUES (?, ?, ?, 'Season', 'Season 1', 1, ?, ?)
+                ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+              `).bind(defaultSeasonId, seriesId, libraryId, seriesFolder.id, toValidUuid(defaultSeasonId)).run();
 
+              const rowEpId = `ep_${seasonItem.id}`;
               const epMatch = epName.match(/(?:[Ss]\d+)?\s*[Ee](\d+)|\b\d+x(\d+)\b|\bEp[._\s]*(\d+)\b|(?:^|\D)(\d{1,3})\s*\./i);
               const epNumber = epMatch ? parseInt(epMatch[1] || epMatch[2] || epMatch[3] || epMatch[4]) : 1;
               await env.DB.prepare(`
-                INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size)
-                VALUES (?, ?, ?, 'Episode', ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size
-              `).bind(`ep_${seasonItem.id}`, defaultSeasonId, libraryId, epName, epNumber, 1, seasonItem.id, seasonItem.name, seasonItem.size || 0).run();
+                INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size, Uuid)
+                VALUES (?, ?, ?, 'Episode', ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
+              `).bind(rowEpId, defaultSeasonId, libraryId, epName, epNumber, 1, seasonItem.id, seasonItem.name, seasonItem.size || 0, toValidUuid(rowEpId)).run();
             }
           }
         }
@@ -146,20 +153,24 @@ export async function runSync(env: any) {
             let name = sub.name;
             try { name = await rc.decryptFileName(sub.name); } catch(e) {}
             if (name.endsWith('.mp3') || name.endsWith('.flac') || name.endsWith('.m4a') || name.endsWith('.aac')) {
+              const audioId = `audio_${sub.id}`;
               await env.DB.prepare(`
-                INSERT OR REPLACE INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size)
-                VALUES (?, ?, ?, 'Audio', ?, ?, ?, ?)
-              `).bind(`audio_${sub.id}`, libraryId, libraryId, name, sub.id, sub.name, sub.size || 0).run();
+                INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
+                VALUES (?, ?, ?, 'Audio', ?, ?, ?, ?, ?)
+                ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
+              `).bind(audioId, libraryId, libraryId, name, sub.id, sub.name, sub.size || 0, toValidUuid(audioId)).run();
             }
           }
         } else {
           let name = item.name;
           try { name = await rc.decryptFileName(item.name); } catch(e) {}
           if (name.endsWith('.mp3') || name.endsWith('.flac') || name.endsWith('.m4a') || name.endsWith('.aac')) {
+            const audioId = `audio_${item.id}`;
             await env.DB.prepare(`
-              INSERT OR REPLACE INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size)
-              VALUES (?, ?, ?, 'Audio', ?, ?, ?, ?)
-            `).bind(`audio_${item.id}`, libraryId, libraryId, name, item.id, item.name, item.size || 0).run();
+              INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
+              VALUES (?, ?, ?, 'Audio', ?, ?, ?, ?, ?)
+              ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
+            `).bind(audioId, libraryId, libraryId, name, item.id, item.name, item.size || 0, toValidUuid(audioId)).run();
           }
         }
       }

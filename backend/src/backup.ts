@@ -6,11 +6,11 @@ export async function getBackupFolderId(gdrive: GoogleDrive): Promise<string> {
     const existing = rootContents.files.find(
       (f: any) =>
         f.mimeType === "application/vnd.google-apps.folder" &&
-        f.name === "DriveFlix_Backups"
+        f.name === "DriveFlin_Backups"
     );
     if (existing) return existing.id;
   }
-  return await gdrive.createFolder("DriveFlix_Backups");
+  return await gdrive.createFolder("DriveFlin_Backups");
 }
 
 export async function createDatabaseBackup(env: any): Promise<any> {
@@ -43,7 +43,7 @@ export async function createDatabaseBackup(env: any): Promise<any> {
   const dateCreated = new Date().toISOString();
   const backupData = {
     version: 1,
-    appName: "DriveFlix",
+    appName: "DriveFlin",
     dateCreated,
     stats: {
       libraries: libraries.length,
@@ -58,7 +58,7 @@ export async function createDatabaseBackup(env: any): Promise<any> {
   };
 
   const jsonStr = JSON.stringify(backupData, null, 2);
-  const fileName = `DriveFlix_Backup_${dateCreated.slice(0, 19).replace(/[:T]/g, "-")}.json`;
+  const fileName = `DriveFlin_Backup_${dateCreated.slice(0, 19).replace(/[:T]/g, "-")}.json`;
   const backupId = "backup_" + Date.now();
 
   // 1. Save to D1 database for instant reliability
