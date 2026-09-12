@@ -1,4 +1,13 @@
-﻿# 🎬 DriveFlin — Serverless Jellyfin on Cloudflare Workers & Google Drive
+# 🎬 DriveFlin — Serverless Jellyfin on Cloudflare Workers & Google Drive
+
+<p align="center">
+  <a href="README.md"><img src="https://img.shields.io/badge/Portugu%C3%AAs-Brasil%20%F0%9F%87%A7%F0%9F%87%B7-2ea44f?style=for-the-badge" alt="Português (Brasil)"></a>
+  <a href="README-en.md"><img src="https://img.shields.io/badge/English-USA%20%F0%9F%87%BA%F0%9F%87%B8-blue?style=for-the-badge" alt="English (US)"></a>
+</p>
+
+<p align="center">
+  🇧🇷 <strong>Português</strong> &nbsp;|&nbsp; <a href="README-en.md">🇺🇸 <strong>English</strong></a>
+</p>
 
 <p align="center">
   <img src="assets/DriveFlin.png" alt="DriveFlin Logo" width="320"/>
@@ -53,7 +62,8 @@ DriveFlin/ (Raiz do repositório)
 ├── package.json          (Dependências e scripts do Worker na raiz)
 ├── tsconfig.json         (Configuração TypeScript para Workers)
 ├── schema.sql            (Esquema do banco D1 com usuário padrão admin/admin)
-├── README.md             (Documentação completa e guia de instalação)
+├── README.md             (Documentação completa e guia de instalação em Português)
+├── README-en.md          (Documentação e guia de instalação em Inglês)
 └── LICENSE               (Licença MIT)
 ```
 
