@@ -1,15 +1,28 @@
-{
+﻿{
   "name": "driveflin",
   "version": "1.0.0",
   "description": "Serverless Jellyfin Media Server running on Cloudflare Workers and Google Drive",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [
+    "jellyfin",
+    "serverless",
+    "cloudflare-workers",
+    "google-drive"
+  ],
   "author": "samucamg",
   "license": "MIT",
-  "scripts": {
-    "dev": "npm run dev --prefix backend",
-    "deploy": "npm run deploy --prefix backend",
-    "d1:init": "npx wrangler d1 execute jellyfin_db_prod --file=backend/schema.sql"
+  "dependencies": {
+    "@fyears/rclone-crypt": "^0.0.7",
+    "hono": "^4.13.7",
+    "tweetnacl": "^1.0.3"
   },
-  "workspaces": [
-    "backend"
-  ]
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260908.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.130.0"
+  }
 }

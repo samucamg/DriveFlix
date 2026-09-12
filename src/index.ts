@@ -205,10 +205,15 @@ async function ensureSchema(db: D1Database) {
       await db.prepare("CREATE INDEX IF NOT EXISTS idx_libraries_uuid ON Libraries(Uuid)").run();
     } catch (e) {}
 
-    const user = await db.prepare("SELECT Id FROM Users LIMIT 1").first();
+    const defaultPassword = env?.ADMIN_PASSWORD || "admin";
+    const user = await db.prepare("SELECT Id, Password FROM Users WHERE Name = 'admin' OR Id = ? LIMIT 1").bind(DEFAULT_ADMIN_ID).first();
     if (!user) {
       await db.prepare("INSERT INTO Users (Id, Name, Password) VALUES (?, ?, ?)")
-        .bind(DEFAULT_ADMIN_ID, "admin", "Filmes@2026")
+        .bind(DEFAULT_ADMIN_ID, "admin", defaultPassword)
+        .run();
+    } else if (user.Password === "Filmes@2026") {
+      await db.prepare("UPDATE Users SET Password = ? WHERE Id = ?")
+        .bind(defaultPassword, user.Id)
         .run();
     }
     schemaReady = true;
@@ -219,7 +224,7 @@ async function ensureSchema(db: D1Database) {
 
 app.use("*", async (c, next) => {
   if (c.env?.DB && !schemaReady) {
-    await ensureSchema(c.env.DB);
+    await ensureSchema(c.env.DB, c.env);
   }
   await next();
 });

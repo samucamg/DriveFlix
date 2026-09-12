@@ -1,4 +1,4 @@
-# 🎬 DriveFlin — Serverless Jellyfin on Cloudflare Workers & Google Drive
+﻿# 🎬 DriveFlin — Serverless Jellyfin on Cloudflare Workers & Google Drive
 
 <p align="center">
   <img src="assets/DriveFlin.png" alt="DriveFlin Logo" width="320"/>
@@ -9,47 +9,72 @@
 </p>
 
 <p align="center">
-  <a href="#-recursos-principais"><img src="https://img.shields.io/badge/Status-Beta%20v1.0-red?style=for-the-badge" alt="Status"></a>
-  <a href="#-arquitetura"><img src="https://img.shields.io/badge/Platform-Cloudflare%20Workers-orange?style=for-the-badge&logo=cloudflare" alt="Cloudflare Workers"></a>
-  <a href="#-arquitetura"><img src="https://img.shields.io/badge/Storage-Google%20Drive-blue?style=for-the-badge&logo=googledrive" alt="Google Drive"></a>
-  <a href="#-arquitetura"><img src="https://img.shields.io/badge/Database-Cloudflare%20D1-blueviolet?style=for-the-badge&logo=sqlite" alt="Cloudflare D1"></a>
+  <a href="https://driveflin.org" target="_blank"><img src="https://img.shields.io/badge/Documentation-driveflin.org-0070f3?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Documentation Website"></a>
+  <a href="https://generator.driveflin.org" target="_blank"><img src="https://img.shields.io/badge/OAuth%20Generator-generator.driveflin.org-success?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Token Generator"></a>
+  <a href="#-estrutura-do-repositório"><img src="https://img.shields.io/badge/Platform-Cloudflare%20Workers-orange?style=for-the-badge&logo=cloudflare" alt="Cloudflare Workers"></a>
+  <a href="#-estrutura-do-repositório"><img src="https://img.shields.io/badge/Storage-Google%20Drive-blue?style=for-the-badge&logo=googledrive" alt="Google Drive"></a>
+  <a href="#-estrutura-do-repositório"><img src="https://img.shields.io/badge/Database-Cloudflare%20D1-blueviolet?style=for-the-badge&logo=sqlite" alt="Cloudflare D1"></a>
 </p>
 
 <p align="center">
-  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/samucamg/DriveFlin" target="_blank">
-    <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" height="38"/>
-  </a>
+  <a href="https://driveflin.org" target="_blank"><strong>🌐 Website e Documentação Oficial: driveflin.org</strong></a>
 </p>
 
 ---
 
 ## 📌 Visão Geral / Overview
 
-**DriveFlin** é uma implementação completa e serverless do backend do **Jellyfin**, projetada para rodar nativamente sobre a infraestrutura global da **Cloudflare** (Workers + D1 SQL + Assets) consumindo arquivos de mídia diretamente do **Google Drive** (Pessoal ou Shared Drives/Team Drives).
+> 🌐 **Site e Documentação Completa:** [https://driveflin.org](https://driveflin.org)  
+> 🔑 **Gerador Automático de Conexão Google Drive:** [https://generator.driveflin.org](https://generator.driveflin.org)  
+> 📖 **Guia Visual de Deploy:** [https://driveflin.org/deploy.php](https://driveflin.org/deploy.php)
 
-Com o DriveFlin, você tem todos os recursos do Jellyfin — interface web moderna com tema Netflix (JellyFlix), busca inteligente de filmes e séries, metadados automáticos do TMDB, suporte a legendas e dual áudio, transmissão para Chromecast e recuperação de backups — com **custo zero de servidor** e alta disponibilidade mundial.
+**DriveFlin** é uma implementação completa e serverless do backend do **Jellyfin**, projetada para rodar nativamente sobre a infraestrutura global da **Cloudflare** (Workers + D1 SQL + Assets) consumindo arquivos de mídia diretamente do **Google Drive** (Pessoal ou Shared/Team Drives).
+
+Com o DriveFlin, você tem todos os recursos do ecossistema Jellyfin — interface web moderna com tema Netflix (JellyFlix), busca inteligente de filmes e séries, metadados automáticos do TMDB, suporte a legendas e dual áudio, transmissão para Chromecast e recuperação de backups — com **custo zero de servidor** e alta disponibilidade mundial.
+
+---
+
+## 📁 Estrutura do Repositório
+
+O repositório foi organizado de forma limpa, direta e padronizada para deploy imediato na Cloudflare Workers:
+
+```text
+DriveFlin/ (Raiz do repositório)
+├── src/
+│   ├── index.ts          (Worker Hono: rotas do Jellyfin API e streaming)
+│   ├── gdrive.ts         (Integração Google Drive API v3 com paginação)
+│   ├── sync.ts           (Sincronização de bibliotecas direta no D1)
+│   ├── tmdb.ts           (Busca de metadados, sinopses e capas TMDB)
+│   ├── backup.ts         (Rotinas de backup e restauração dupla)
+│   ├── inject.ts         (Injeção de scripts e customizações na Web UI)
+│   └── oauth_page.ts     (Página interna de autenticação OAuth)
+├── public/               (Interface Web oficial do Jellyfin pronta para o Worker)
+├── wrangler.toml         (Configuração D1, Cron Triggers e Worker na raiz)
+├── package.json          (Dependências e scripts do Worker na raiz)
+├── tsconfig.json         (Configuração TypeScript para Workers)
+├── schema.sql            (Esquema do banco D1 com usuário padrão admin/admin)
+├── README.md             (Documentação completa e guia de instalação)
+└── LICENSE               (Licença MIT)
+```
 
 ---
 
 ## ✨ Recursos Principais
 
-- ⚡ **100% Serverless & Custo Zero**: Não requer VPS, servidor dedicado nem Docker ligado 24/7. Executa no plano gratuito do Cloudflare Workers.
+- ⚡ **100% Serverless & Custo Zero**: Não requer VPS, servidor dedicado nem Docker ligado 24/7. Executa no plano gratuito da Cloudflare.
 - 📂 **Integração Nativa com Google Drive**: Streaming direto de arquivos `.mp4`, `.mkv`, `.avi`, `.mp3` e `.flac`.
-- 🗂️ **Navegação de Pastas no Painel de Controle**: Ao criar ou editar uma biblioteca de mídia, navegue pelas pastas do Google Drive diretamente na janela do Jellyfin.
-- 💾 **Sistema Completo de Backup & Restauração**:
+- 🗂️ **Navegação de Pastas no Painel**: Ao criar ou editar uma biblioteca, navegue pelas pastas do Google Drive diretamente na janela do Jellyfin.
+- 🎬 **Metadados & Capas via TMDB**: Identificação automática de títulos, sinopse, ano, classificação indicativa e busca remota com 1 clique.
+- 👥 **Agrupamento Automático de Versões**: Múltiplos arquivos com o mesmo nome na biblioteca são unificados em um único cartaz com seleção de fontes de mídia (*MediaSources*).
+- 💾 **Sistema Duplo de Backup & Restauração**:
   - Exportação em 1 clique de todas as tabelas (Bibliotecas, Itens, Progresso e Configurações).
-  - Persistência dupla: salva os backups na pasta `DriveFlin_Backups` do seu Google Drive e na tabela interna do Cloudflare D1.
+  - Salva os backups na pasta `DriveFlin_Backups` do seu Google Drive e na tabela interna do Cloudflare D1.
   - Restauração instantânea para fácil migração.
-- 🎨 **Interface Netflix Premium (JellyFlix)**: Jellyfin Web oficial pré-configurado com tema escuro estilo Netflix, fontes modernas, cartazes em alta definição e logos originais.
-- 📺 **Transmissão para Chromecast & Smart TVs**:
-  - Compatibilidade com o aplicativo oficial do Jellyfin para Google Cast (`F007D354`).
-  - Suporte total a requisições parciais HTTP (`206 Partial Content`), cabeçalhos `Range`, requisições `HEAD` e CORS liberado (`*`).
-- 🎬 **Metadados & Capas via TMDB**: Identificação automática de títulos, sinopse, ano, classificação indicativa e busca de pôsteres remotos com 1 clique.
+- 🎨 **Interface Netflix Premium (JellyFlix)**: Jellyfin Web oficial pré-configurado com tema escuro estilo Netflix, fontes modernas e cartazes em alta definição.
+- 📺 **Transmissão para Chromecast & Smart TVs**: Compatível com o app oficial do Jellyfin para Google Cast (`F007D354`), suporte a `206 Partial Content`, cabeçalhos `Range` e CORS aberto.
 - 🔐 **Descriptografia de Nomes via Rclone-Crypt**: Suporte a nomes de arquivos ofuscados ou criptografados via Rclone no Google Drive.
 - ⏰ **Tarefas Agendadas Automáticas (Cron Trigger)**: Sincronização periódica a cada hora (`0 * * * *`) para indexar novos arquivos adicionados ao Google Drive.
-- 🎧 **Separação de Mídias Inteligente**: Carrosséis distintos de "Continuar assistindo" (para filmes e séries) e "Continuar Escutando" (para músicas).
-- 🔑 **Gerador de Conexão Google Drive Embutido (`/oauth`)**: Obtenha seu Refresh Token de forma 100% segura e privada diretamente no seu Worker, sem enviar credenciais para servidores de terceiros.
-
+- 🔑 **Gerador de Conexão Google Drive Embutido**: Obtenha seu Refresh Token de forma 100% segura e privada pelo [generator.driveflin.org](https://generator.driveflin.org).
 
 ---
 
@@ -81,90 +106,115 @@ flowchart TD
 
 ---
 
-## 📋 Pré-requisitos
+## 🚀 Guia de Instalação e Deploy Visual na Cloudflare (Recomendado via Web)
 
-1. **Conta na Cloudflare** (Gratuita).
-2. **Conta no Google Cloud Platform** com a API do Google Drive ativada (Gratuita).
-3. **Chave de API do TMDB** (The Movie Database - Gratuita).
-4. **Node.js 18+** instalado localmente.
+A forma mais simples, rápida e moderna de publicar o seu DriveFlin é utilizando a integração contínua da **Cloudflare com o GitHub**. Não é necessário instalar ferramentas no computador caso prefira fazer tudo pelo navegador.
+
+### Passo 1: Fazer o Fork do Repositório
+1. No canto superior direito desta página no GitHub, clique no botão **Fork**.
+2. Selecione a sua conta pessoal e clique em **Create fork**.
+3. Agora você tem uma cópia completa e independente do DriveFlin na sua própria conta do GitHub.
 
 ---
 
-## 🚀 Guia de Instalação e Deploy
+### Passo 2: Criar e Inicializar o Banco Cloudflare D1
+1. Acesse o painel da Cloudflare: [dash.cloudflare.com](https://dash.cloudflare.com).
+2. No menu lateral, navegue até **Workers e Pages** > **D1**.
+3. Clique em **Criar banco de dados** (Create Database).
+4. Defina o nome como `jellyfin_db_prod` (ou outro nome de sua preferência) e clique em **Criar**.
+5. Abra o banco criado e clique na aba **Console**.
+6. Abra o arquivo [`schema.sql`](schema.sql) deste repositório, copie todo o código SQL, cole na caixa do console da Cloudflare e clique em **Executar** (Execute).
+   - *Isso criará todas as tabelas necessárias e o usuário administrador padrão com login `admin` e senha `admin`.*
 
-### 1. Clonar o Repositório
+---
+
+### Passo 3: Conectar o Repositório no Cloudflare Workers
+1. No painel da Cloudflare, vá em **Workers e Pages** > **Criar aplicativo** (Create application).
+2. Selecione a aba **Workers** e clique em **Conectar ao Git** (Connect to Git).
+3. Conecte sua conta do GitHub e selecione o seu repositório bifurcado (`seu-usuario/DriveFlin`).
+4. A Cloudflare detectará automaticamente o arquivo `wrangler.toml` presente na raiz do projeto.
+5. Clique em **Salvar e implantar** (Save and Deploy).
+
+---
+
+### Passo 4: Configurar a Vinculação do D1 e as Variáveis de Ambiente
+Após a primeira compilação do Worker, precisamos conectar o banco e suas credenciais de mídia:
+
+1. No seu Worker recém-criado, vá em **Configurações (Settings)** > **Vinculações (Bindings)**:
+   - Clique em **Adicionar (Add)** > selecione **Banco de dados D1 (D1 Database)**.
+   - **Nome da variável (Variable name):** `DB` *(exatamente em maiúsculas)*.
+   - **Banco D1:** Selecione o banco `jellyfin_db_prod` criado no Passo 2.
+   - Clique em **Salvar (Save)**.
+
+2. Em **Configurações (Settings)** > **Variáveis e Segredos (Variables and Secrets)**, adicione:
+   | Variável / Segredo | Tipo | Descrição |
+   | :--- | :--- | :--- |
+   | `GDRIVE_CLIENT_ID` | Secret | Client ID obtido no Google Cloud Console. |
+   | `GDRIVE_CLIENT_SECRET` | Secret | Client Secret obtido no Google Cloud Console. |
+   | `GDRIVE_REFRESH_TOKEN` | Secret | Refresh Token obtido no [generator.driveflin.org](https://generator.driveflin.org). |
+   | `TMDB_API_KEY` | Secret / Texto | Chave de API gratuita do [TheMovieDB](https://www.themoviedb.org/settings/api). |
+   | `ADMIN_PASSWORD` | Secret / Texto | *(Opcional)* Senha do admin. Se omitido, o padrão é `admin`. |
+   | `GDRIVE_TEAM_DRIVE_ID` | Secret / Texto | *(Opcional)* ID do Drive Compartilhado (Shared/Team Drive). |
+   | `RCLONE_PASS` | Secret | *(Opcional)* Senha caso seus arquivos no Drive usem Rclone Crypt. |
+   | `RCLONE_SALT` | Secret | *(Opcional)* Salt caso seus arquivos usem Rclone Crypt. |
+
+3. Clique em **Salvar e implantar** (Save and Deploy) para aplicar as alterações.
+
+---
+
+### Passo 5: Acessar a Interface e Configurar suas Mídias
+1. Acesse o endereço do seu Worker fornecido pela Cloudflare:  
+   `https://driveflin.seu-subdominio.workers.dev/web/index.html`
+2. **Login Inicial Padrão:**
+   - **Usuário:** `admin`
+   - **Senha:** `admin`
+3. Vá em **Painel de Controle** (ícone de usuário > Painel) > **Bibliotecas**.
+4. Clique em **+ Adicionar Biblioteca de Mídia**, selecione a categoria (Filmes, Séries ou Música) e selecione diretamente sua pasta do Google Drive pelo navegador visual!
+
+---
+
+## 💻 Alternativa: Deploy via Linha de Comando (Wrangler CLI)
+
+Para desenvolvedores que preferem gerenciar tudo pelo terminal local:
+
 ```bash
+# 1. Clonar o repositório
 git clone https://github.com/samucamg/DriveFlin.git
 cd DriveFlin
-```
 
-### 2. Instalar Dependências
-```bash
+# 2. Instalar dependências
 npm install
-```
 
-### 3. Configurar o Banco de Dados Cloudflare D1
-Crie a instância do banco D1 na sua conta Cloudflare:
-```bash
-cd backend
+# 3. Criar banco D1 na Cloudflare
 npx wrangler d1 create jellyfin_db_prod
-```
-O comando retornará o `database_id`. Atualize o arquivo `backend/wrangler.toml` com esse ID:
-```toml
-[[d1_databases]]
-binding = "DB"
-database_name = "jellyfin_db_prod"
-database_id = "SEU_DATABASE_ID_AQUI"
-```
 
-Inicialize o esquema do banco de dados:
-```bash
+# 4. Executar o schema inicial
 npx wrangler d1 execute jellyfin_db_prod --remote --file=schema.sql
-```
 
-### 4. Configurar as Credenciais e Segredos (Secrets)
-Defina as variáveis de ambiente necessárias via Wrangler:
-
-```bash
-# Credenciais do Google Drive API (OAuth 2.0)
+# 5. Configurar os segredos
 npx wrangler secret put GDRIVE_CLIENT_ID
 npx wrangler secret put GDRIVE_CLIENT_SECRET
 npx wrangler secret put GDRIVE_REFRESH_TOKEN
-
-# Opcional: ID do Shared / Team Drive (deixe em branco se usar Drive pessoal)
-npx wrangler secret put GDRIVE_TEAM_DRIVE_ID
-
-# Chave do TMDB para pôsteres e metadados
 npx wrangler secret put TMDB_API_KEY
 
-# Opcional: Senha e Salt caso seus arquivos no Google Drive usem Rclone Crypt
-npx wrangler secret put RCLONE_PASS
-npx wrangler secret put RCLONE_SALT
-```
-
-### 5. Deploy no Cloudflare Workers
-```bash
+# 6. Publicar o Worker
 npx wrangler deploy
 ```
-Pronto! Seu servidor Jellyfin estará online e acessível no endereço fornecido pela Cloudflare (ou no seu domínio personalizado associado).
 
 ---
 
-## 📖 Como Usar
+## 📖 Como Usar & Dicas do Dia a Dia
 
-1. **Login Inicial**:
+1. **Credenciais de Fábrica**:
    - **Usuário**: `admin`
-   - **Senha**: `Filmes@2026` *(Recomendamos alterar nas configurações de usuário do painel)*.
-2. **Adicionar Novas Bibliotecas**:
-   - Acesse **Painel de Controle** -> **Bibliotecas**.
-   - Clique em **+ Adicionar Biblioteca de Mídia**.
-   - Escolha o tipo de conteúdo (Filmes, Séries, Música).
-   - Ao adicionar uma pasta, use o seletor visual do Google Drive ou insira diretamente o ID da pasta do Google Drive.
-   - O DriveFlin iniciará a sincronização e o enriquecimento de metadados automaticamente em segundo plano.
-3. **Criar e Restaurar Backups**:
-   - Acesse **Painel de Controle** -> **Backups**.
-   - Clique em **Criar backup** para gerar um arquivo `.json` completo salvo no seu Google Drive (`DriveFlin_Backups`) e no Cloudflare D1.
-   - Clique no botão de restauração em qualquer backup da lista para recuperar instantaneamente seu servidor.
+   - **Senha**: `admin`
+   - *Recomendamos alterar a senha a qualquer momento no menu de usuários do painel.*
+2. **Identificação e Capas (TMDB)**:
+   - Se algum título não carregar a capa automaticamente, clique nos três pontinhos do cartaz > **Identificar**.
+   - Digite o nome do filme ou série. O DriveFlin salvará a capa em alta resolução e a sinopse em português de forma permanente.
+3. **Gerar e Restaurar Backups**:
+   - Acesse **Painel de Controle** > **Backups**.
+   - O sistema gera arquivos `.json` gravados tanto no Google Drive quanto no Cloudflare D1 para restauração com 1 clique.
 
 ---
 
@@ -187,11 +237,21 @@ Pronto! Seu servidor Jellyfin estará online e acessível no endereço fornecido
 
 ---
 
-## 📄 Licença
+## 🔗 Links Úteis e Documentação Oficial
 
-Distribuído sob a licença MIT. Consulte `LICENSE` para mais detalhes.
+- 🌐 **Website e Documentação:** [https://driveflin.org](https://driveflin.org)
+- 🚀 **Tutorial Ilustrado de Deploy:** [https://driveflin.org/deploy.php](https://driveflin.org/deploy.php)
+- 🔑 **Gerador de Conexão OAuth Google Drive:** [https://generator.driveflin.org](https://generator.driveflin.org)
+- 📂 **Organização de Bibliotecas e Pastas:** [https://driveflin.org/libraries.php](https://driveflin.org/libraries.php)
+- ⚡ **Comparativo Técnico e Serverless:** [https://driveflin.org/differences.php](https://driveflin.org/differences.php)
+- ❓ **FAQ e Resolução de Problemas:** [https://driveflin.org/faq.php](https://driveflin.org/faq.php)
+- 👥 **Comunidade e Colaboração:** [https://driveflin.org/community.php](https://driveflin.org/community.php)
 
 ---
+
+## 📄 Licença
+
+Distribuído sob a licença MIT. Consulte [`LICENSE`](LICENSE) para mais detalhes.
 
 <p align="center">
   Desenvolvido com carinho para a comunidade open-source. Se este projeto foi útil para você, deixe uma ⭐ no repositório!
