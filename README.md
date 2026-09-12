@@ -168,6 +168,18 @@ Pronto! Seu servidor Jellyfin estará online e acessível no endereço fornecido
 
 ---
 
+## ⚖️ Propósito do Projeto, Uso Recomendado & Isenção (Disclaimer)
+
+> [!IMPORTANT]
+> **O DriveFlin foi desenvolvido exclusivamente para uso pessoal, acervos familiares e compartilhamento privado com amigos.**
+
+- 🏠 **Foco em Uso Pessoal e Diário**: O objetivo primordial do DriveFlin é oferecer uma alternativa serverless econômica, ágil e livre de manutenção para o consumo diário de mídia, eliminando a necessidade de manter computadores ou servidores dedicados ligados 24 horas por dia consumindo energia.
+- 📚 **Bibliotecas com Milhares de Filmes e Séries**: Para acervos de grande porte (milhares de filmes, séries e dezenas de milhares de episódios), recomendamos utilizar o **aplicativo desktop / servidor tradicional do [Jellyfin Oficial](https://jellyfin.org)** (instalado em PC dedicado, NAS ou Docker). O servidor oficial conta com banco de dados local de alta capacidade, indexação multithread pesada e suporte a transcodificação dedicada por GPU/FFmpeg.
+- 🚫 **Não Indicado para Provedores e Fins Comerciais**: O DriveFlin **NÃO** é indicado, projetado ou homologado para provedores de internet, revendedores de listas/contas, empresas ou qualquer atividade comercial de distribuição de streaming. Nesses cenários corporativos ou de grande volume de tráfego concorrente, recomendamos sempre e categoricamente a infraestrutura e a distribuição do projeto oficial do Jellyfin.
+- ℹ️ **Isenção de Vínculo**: O DriveFlin é uma implementação independente e open-source compatível com as APIs abertas do ecossistema Jellyfin e Google Drive. Não possui vínculo, afiliação, patrocínio ou endosso da Jellyfin Foundation ou da Google LLC.
+
+---
+
 ## ⚠️ Limitações Importantes
 
 - **Apenas Direct Play / Direct Stream**: O ambiente serverless de borda (Cloudflare Workers / V8 Isolates) não possui suporte a execução de binários locais como `ffmpeg` nem placas de vídeo dedicadas. Portanto, **não há transcodificação de vídeo em tempo real**. A reprodução depende da capacidade do navegador ou dispositivo do usuário decodificar diretamente os formatos de mídia (`H.264`, `AAC`, `MP3`, etc.).

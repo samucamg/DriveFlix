@@ -40,6 +40,8 @@ updates.sql
 insert.sql
 *.tmp
 *run_sync*
+*debug*.json
+openapi.json
 
 # OS & Editor files
 .DS_Store

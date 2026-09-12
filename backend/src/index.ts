@@ -59,9 +59,9 @@ function getImageTag(fileId: string | null | undefined): string | undefined {
 }
 
 
-export const SERVER_ID = "639b4876bbb8b346ea020612bfe01ba8";
-export const DEFAULT_ADMIN_ID = "ee09da3140518fedd8b0f27b8b59bafb";
-export const DEFAULT_SESSION_ID = "7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d";
+const SERVER_ID = "639b4876bbb8b346ea020612bfe01ba8";
+const DEFAULT_ADMIN_ID = "ee09da3140518fedd8b0f27b8b59bafb";
+const DEFAULT_SESSION_ID = "7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d";
 
 export function toValidUuid(str: string | null | undefined): string {
   if (!str) return DEFAULT_ADMIN_ID;
@@ -88,7 +88,7 @@ export function toValidUuid(str: string | null | undefined): string {
   return (toHex(h1) + toHex(h2) + toHex(h3) + toHex(h4)).toLowerCase();
 }
 
-export async function resolveLibrary(db: D1Database, idOrUuid: string | null | undefined): Promise<any> {
+async function resolveLibrary(db: D1Database, idOrUuid: string | null | undefined): Promise<any> {
   if (!idOrUuid) return null;
   const clean = idOrUuid.trim().replace(/-/g, "").toLowerCase();
   let row = await db.prepare("SELECT * FROM Libraries WHERE Id = ? OR Uuid = ?").bind(idOrUuid, clean).first();
@@ -107,7 +107,7 @@ export async function resolveLibrary(db: D1Database, idOrUuid: string | null | u
   return null;
 }
 
-export async function resolveItem(db: D1Database, idOrUuid: string | null | undefined): Promise<any> {
+async function resolveItem(db: D1Database, idOrUuid: string | null | undefined): Promise<any> {
   if (!idOrUuid) return null;
   const clean = idOrUuid.trim().replace(/-/g, "").toLowerCase();
   let row = await db.prepare("SELECT * FROM Items WHERE Id = ? OR Uuid = ?").bind(idOrUuid, clean).first();
@@ -306,12 +306,26 @@ app.get("/debug_logs", async (c) => {
 app.get("/web/ConfigurationPages", (c) => c.json([]));
 app.get("/ConfigurationPages", (c) => c.json([]));
 
+app.get("/fix-uuid", async (c) => {
+  const items = await c.env.DB.prepare("SELECT Id FROM Items").all();
+  for (const item of items.results) {
+    await c.env.DB.prepare("UPDATE Items SET Uuid = ? WHERE Id = ?").bind(toValidUuid(item.Id), item.Id).run();
+  }
+  const libs = await c.env.DB.prepare("SELECT Id FROM Libraries").all();
+  for (const lib of libs.results) {
+    await c.env.DB.prepare("UPDATE Libraries SET Uuid = ? WHERE Id = ?").bind(toValidUuid(lib.Id), lib.Id).run();
+  }
+  return c.text("Fixed UUIDs");
+});
+
 app.get("/web/*", async (c) => {
   const url = new URL(c.req.url);
   const targetUrl = `https://demo.jellyfin.org/stable${url.pathname}${url.search}`;
 
+  const newHeaders = new Headers(c.req.header());
+  newHeaders.delete("accept-encoding");
   const response = await fetch(targetUrl, {
-    headers: c.req.header(),
+    headers: newHeaders,
   });
 
   if (url.pathname.endsWith("index.html")) {
@@ -2584,9 +2598,9 @@ const handleLatestItems = async (c: any) => {
       AlbumId: isAudio ? "album_view_musicas" : undefined,
       AlbumArtist: isAudio ? "Vários Artistas" : undefined,
       AlbumArtists: isAudio ? [{ Name: "Vários Artistas", Id: "artist_varios" }] : undefined,
-      PrimaryImageTag: "cached",
-      ImageTags: { Primary: "cached" },
-      BackdropImageTags: ["cached"],
+      PrimaryImageTag: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "cached",
+      ImageTags: { Primary: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "cached" },
+      BackdropImageTags: row.BackdropImageFileId ? [getImageTag(row.BackdropImageFileId) || "cached"] : ["cached"],
       UserData: userData,
       DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
     };
@@ -2934,9 +2948,9 @@ const getItemById = async (c: any, itemId: string) => {
     UserData: userData,
     Width: parsed.Width,
     Height: parsed.Height,
-    PrimaryImageTag: row.PrimaryImageFileId ? "cached" : "poster",
-    ImageTags: { Primary: row.PrimaryImageFileId ? "cached" : "poster" },
-    BackdropImageTags: [row.BackdropImageFileId ? "cached" : "backdrop"],
+    PrimaryImageTag: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "poster",
+    ImageTags: { Primary: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "poster" },
+    BackdropImageTags: row.BackdropImageFileId ? [getImageTag(row.BackdropImageFileId) || "cached"] : ["backdrop"],
     Path: row.FileId ? `/media/${row.Name}` : undefined,
     Overview: overview,
     Taglines: tagline ? [tagline] : [],
@@ -3575,7 +3589,10 @@ const itemsHandler = async (c: any) => {
   const itemIds = results.map((r: any) => r.Id);
   const userDataMap = await fetchUserItemDataMap(c.env.DB, userId, itemIds);
 
-  const jellyfinItems = results.map((row: any) => {
+  const jellyfinItems: any[] = [];
+  const groupedItemsMap = new Map<string, any>();
+
+  for (const row of results) {
     const isVideo = row.Type === "Movie" || row.Type === "Episode";
     const isAudio = row.Type === "Audio";
     const isSeries = row.Type === "Series";
@@ -3594,7 +3611,7 @@ const itemsHandler = async (c: any) => {
     const userData = buildUserData(itemUuid, userDataMap.get(row.Id) || userDataMap.get(itemUuid), parsed.RunTimeTicks);
     const hasImage = !!(row.PrimaryImageFileId || row.BackdropImageFileId);
 
-    return {
+    const item = {
       Name: cleanName,
       ServerId: SERVER_ID,
       Id: itemUuid,
@@ -3611,11 +3628,9 @@ const itemsHandler = async (c: any) => {
       IsFolder: row.Type === "Series" || row.Type === "Season",
       Type: row.Type,
       UserData: userData,
-      PrimaryImageTag: "cached",
-      ImageTags: {
-        Primary: "cached",
-      },
-      BackdropImageTags: ["cached"],
+      PrimaryImageTag: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "cached",
+      ImageTags: { Primary: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "cached" },
+      BackdropImageTags: row.BackdropImageFileId ? [getImageTag(row.BackdropImageFileId) || "cached"] : ["cached"],
       LocationType: "FileSystem",
       MediaType: isVideo ? "Video" : (isAudio ? "Audio" : "Unknown"),
       RunTimeTicks: parsed.RunTimeTicks,
@@ -3631,7 +3646,26 @@ const itemsHandler = async (c: any) => {
         ? [buildMediaSource(row, parsed, isVideo, isAudio, container, itemUuid)]
         : undefined,
     };
-  });
+
+    if (row.Type === "Movie" || row.Type === "Episode") {
+      const key = `${row.Type}_${cleanName}_${row.ParentId || row.LibraryId}`;
+      if (groupedItemsMap.has(key)) {
+        const existing = groupedItemsMap.get(key);
+        if (item.MediaSources && existing.MediaSources) {
+          existing.MediaSources.push(...item.MediaSources);
+        }
+        if (!existing.PrimaryImageTag || existing.PrimaryImageTag === "cached") {
+          existing.PrimaryImageTag = item.PrimaryImageTag;
+          existing.ImageTags.Primary = item.ImageTags.Primary;
+        }
+      } else {
+        groupedItemsMap.set(key, item);
+        jellyfinItems.push(item);
+      }
+    } else {
+      jellyfinItems.push(item);
+    }
+  }
 
   return c.json({
     Items: jellyfinItems,
@@ -3665,7 +3699,7 @@ app.post("/internal/syncLibrary", async (c) => {
         await c.env.DB.prepare(`
           INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FolderId, Uuid)
           VALUES (?, ?, ?, 'Series', ?, ?, ?)
-          ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+          ON CONFLICT(Id) DO UPDATE SET Name = CASE WHEN Items.TmdbId IS NULL THEN excluded.Name ELSE Items.Name END, FolderId = excluded.FolderId, Uuid = excluded.Uuid
         `).bind(seriesId, libId, libId, seriesName, seriesFolder.id, toValidUuid(seriesId)).run();
 
         const url = new URL(c.req.url);
@@ -3690,7 +3724,7 @@ app.post("/internal/syncLibrary", async (c) => {
                 await c.env.DB.prepare(`
                   INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
                   VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?, ?)
-                  ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
+                  ON CONFLICT(Id) DO UPDATE SET Name = CASE WHEN Items.TmdbId IS NULL THEN excluded.Name ELSE Items.Name END, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
                 `).bind(rowId, libId, libId, name, sub.id, sub.name, sub.size || 0, toValidUuid(rowId)).run();
               }
             }
@@ -3702,7 +3736,7 @@ app.post("/internal/syncLibrary", async (c) => {
               await c.env.DB.prepare(`
                 INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
                 VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?, ?)
-                ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
+                ON CONFLICT(Id) DO UPDATE SET Name = CASE WHEN Items.TmdbId IS NULL THEN excluded.Name ELSE Items.Name END, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
               `).bind(rowId, libId, libId, name, item.id, item.name, item.size || 0, toValidUuid(rowId)).run();
             }
           }
@@ -3738,7 +3772,7 @@ app.post("/internal/syncSeries", async (c) => {
         await c.env.DB.prepare(`
           INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId, Uuid)
           VALUES (?, ?, ?, 'Season', ?, ?, ?, ?)
-          ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+          ON CONFLICT(Id) DO UPDATE SET Name = CASE WHEN Items.TmdbId IS NULL THEN excluded.Name ELSE Items.Name END, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId, Uuid = excluded.Uuid
         `).bind(seasonId, seriesId, libraryId, seasonName, seasonNumber, seasonItem.id, toValidUuid(seasonId)).run();
 
         const epList: any = await gdrive.listFolder(seasonItem.id);
@@ -3753,7 +3787,7 @@ app.post("/internal/syncSeries", async (c) => {
             await c.env.DB.prepare(`
               INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size, Uuid)
               VALUES (?, ?, ?, 'Episode', ?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
+              ON CONFLICT(Id) DO UPDATE SET Name = CASE WHEN Items.TmdbId IS NULL THEN excluded.Name ELSE Items.Name END, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
             `).bind(rowEpId, seasonId, libraryId, epName, epNumber, seasonNumber, ep.id, ep.name, ep.size || 0, toValidUuid(rowEpId)).run();
           }
         }
@@ -3765,7 +3799,7 @@ app.post("/internal/syncSeries", async (c) => {
           await c.env.DB.prepare(`
             INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId, Uuid)
             VALUES (?, ?, ?, 'Season', 'Season 1', 1, ?, ?)
-            ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+            ON CONFLICT(Id) DO UPDATE SET Name = CASE WHEN Items.TmdbId IS NULL THEN excluded.Name ELSE Items.Name END, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId, Uuid = excluded.Uuid
           `).bind(defaultSeasonId, seriesId, libraryId, seriesFolderId, toValidUuid(defaultSeasonId)).run();
 
           const rowEpId = `ep_${seasonItem.id}`;
@@ -3774,7 +3808,7 @@ app.post("/internal/syncSeries", async (c) => {
           await c.env.DB.prepare(`
             INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size, Uuid)
             VALUES (?, ?, ?, 'Episode', ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
+            ON CONFLICT(Id) DO UPDATE SET Name = CASE WHEN Items.TmdbId IS NULL THEN excluded.Name ELSE Items.Name END, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
           `).bind(rowEpId, defaultSeasonId, libraryId, epName, epNumber, 1, seasonItem.id, seasonItem.name, seasonItem.size || 0, toValidUuid(rowEpId)).run();
         }
       }
@@ -3832,8 +3866,9 @@ const handleShowsSeasons = async (c: any) => {
       ParentPrimaryImageItemId: seriesUuid,
       ParentPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : "poster",
       SeriesPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : "poster",
-      ImageTags: { Primary: row.PrimaryImageFileId ? "cached" : (series?.PrimaryImageFileId ? "cached" : "poster") },
-      BackdropImageTags: row.BackdropImageFileId ? ["cached"] : (series?.BackdropImageFileId ? ["cached"] : ["backdrop"]),
+      PrimaryImageTag: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "poster",
+      ImageTags: { Primary: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "poster" },
+      BackdropImageTags: row.BackdropImageFileId ? [getImageTag(row.BackdropImageFileId) || "cached"] : (series?.BackdropImageFileId ? ["cached"] : ["backdrop"]),
       LocationType: "FileSystem",
       MediaType: "Unknown",
       DisplayPreferencesId: toValidUuid("displaypref_" + row.Id),
@@ -3982,8 +4017,8 @@ const handleShowsEpisodes = async (c: any) => {
       RunTimeTicks: parsed.RunTimeTicks,
       HasSubtitles: parsed.MediaStreams.some((s: any) => s.Type === "Subtitle"),
       Overview: epOverview,
-      PrimaryImageTag: "cached",
-      ImageTags: { Primary: "cached" },
+      PrimaryImageTag: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "cached",
+      ImageTags: { Primary: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "cached" },
       ParentPrimaryImageItemId: seriesUuid,
       ParentPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : undefined,
       SeriesPrimaryImageTag: series?.PrimaryImageFileId ? "cached" : undefined,
@@ -4302,8 +4337,8 @@ const handleRemoteSearchApply = async (c: any) => {
 
   const updatedMediaInfoStr = JSON.stringify(existingMediaInfo);
 
-  const primaryImage = (replaceAllImages || !item.PrimaryImageFileId) ? (newPoster || item.PrimaryImageFileId) : item.PrimaryImageFileId;
-  const backdropImage = (replaceAllImages || !item.BackdropImageFileId) ? (newBackdrop || item.BackdropImageFileId) : item.BackdropImageFileId;
+  const primaryImage = newPoster || item.PrimaryImageFileId;
+  const backdropImage = newBackdrop || item.BackdropImageFileId;
 
   await c.env.DB.prepare(`
     UPDATE Items SET 
@@ -4433,8 +4468,8 @@ const handleNextUp = async (c: any) => {
       RunTimeTicks: parsed.RunTimeTicks,
       HasSubtitles: parsed.MediaStreams.some((s: any) => s.Type === "Subtitle"),
       Overview: epOverview,
-      PrimaryImageTag: "cached",
-      ImageTags: { Primary: "cached" },
+      PrimaryImageTag: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "cached",
+      ImageTags: { Primary: row.PrimaryImageFileId ? (getImageTag(row.PrimaryImageFileId) || "cached") : "cached" },
       SeriesPrimaryImageTag: sPoster ? "cached" : undefined,
       ParentPrimaryImageItemId: sUuid,
       ParentPrimaryImageTag: sPoster ? "cached" : undefined,
@@ -4480,11 +4515,25 @@ const handlePlaybackInfo = async (c: any) => {
   const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
   const effectiveMediaSourceId = mediaSourceId || row.Uuid || toValidUuid(row.Id);
 
+  let allRows = [row];
+  if (row.Type === "Movie" || row.Type === "Episode") {
+    const parentCondition = row.ParentId ? `ParentId = '${row.ParentId}'` : (row.LibraryId ? `LibraryId = '${row.LibraryId}'` : "1=1");
+    const siblings = await c.env.DB.prepare(`SELECT * FROM Items WHERE Name = ? AND Type = ? AND ${parentCondition}`).bind(row.Name, row.Type).all();
+    if (siblings.results && siblings.results.length > 0) {
+      allRows = siblings.results;
+    }
+  }
+
+  const mediaSources = allRows.map((r: any) => {
+    const p = parseMediaInfo(r);
+    const c = r.Type === "Audio" ? "mp3" : (r.Name.endsWith(".mkv") ? "mkv" : "mp4");
+    const eId = r.Uuid || toValidUuid(r.Id);
+    return buildMediaSource(r, p, isVideo, isAudio, c, eId);
+  });
+
   return c.json({
     PlaySessionId: toValidUuid("playsession_" + row.Id),
-    MediaSources: [
-      buildMediaSource(row, parsed, isVideo, isAudio, container, effectiveMediaSourceId)
-    ],
+    MediaSources: mediaSources,
   });
 };
 

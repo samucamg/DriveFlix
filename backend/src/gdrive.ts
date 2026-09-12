@@ -45,40 +45,47 @@ export class GoogleDrive {
 
   async listFolder(folderId: string = 'root') {
     const token = await this.getAccessToken();
-    let url = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=files(id,name,mimeType,size,createdTime)&includeItemsFromAllDrives=true&supportsAllDrives=true`;
+    let urlBase = `https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=nextPageToken,files(id,name,mimeType,size,createdTime)&includeItemsFromAllDrives=true&supportsAllDrives=true`;
     
     if (folderId === 'root' && this.teamDriveId && this.teamDriveId.trim() !== '') {
-      url = `https://www.googleapis.com/drive/v3/files?q='${this.teamDriveId}'+in+parents+and+trashed=false&fields=files(id,name,mimeType,size,createdTime)&includeItemsFromAllDrives=true&supportsAllDrives=true&corpora=drive&driveId=${this.teamDriveId}`;
+      urlBase += `&q='${this.teamDriveId}'+in+parents+and+trashed=false&corpora=drive&driveId=${this.teamDriveId}`;
+    } else {
+      urlBase += `&q='${folderId}'+in+parents+and+trashed=false`;
     }
 
-    let res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
+    let allFiles: any[] = [];
+    let pageToken: string | null = null;
+    let anySuccess = false;
 
-    let data: any = null;
-    if (res.ok) {
-      data = await res.json();
-    }
-
-    if ((!res.ok || !data || !data.files || data.files.length === 0) && folderId === 'root') {
-      url = `https://www.googleapis.com/drive/v3/files?q='root'+in+parents+and+trashed=false&fields=files(id,name,mimeType,size,createdTime)&includeItemsFromAllDrives=true&supportsAllDrives=true`;
-      res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+    do {
+      let url = urlBase;
+      if (pageToken) url += `&pageToken=${pageToken}`;
+      
+      let res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.ok) {
-        data = await res.json();
+      
+      if (!res.ok && folderId === 'root' && !pageToken) {
+        // Fallback for root if teamDriveId fails
+        urlBase = `https://www.googleapis.com/drive/v3/files?pageSize=1000&q='root'+in+parents+and+trashed=false&fields=nextPageToken,files(id,name,mimeType,size,createdTime)&includeItemsFromAllDrives=true&supportsAllDrives=true`;
+        res = await fetch(urlBase, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
       }
-    }
 
-    if (!res.ok) {
-      throw new Error(`Failed to list folder: ${await res.text()}`);
-    }
+      if (!res.ok) {
+        throw new Error(`Failed to list folder: ${await res.text()}`);
+      }
 
-    return data;
+      const data: any = await res.json();
+      anySuccess = true;
+      if (data.files && data.files.length > 0) {
+        allFiles = allFiles.concat(data.files);
+      }
+      pageToken = data.nextPageToken || null;
+    } while (pageToken);
+
+    return { files: allFiles };
   }
 
   async uploadFile(fileName: string, mimeType: string, parentFolderId: string, streamOrBuffer: any): Promise<string> {

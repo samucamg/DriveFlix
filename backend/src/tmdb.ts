@@ -25,24 +25,29 @@ export function getEffectiveKey(apiKey?: string): string {
 export function cleanMediaTitle(rawTitle: string): { query: string; year?: string } {
   let str = rawTitle;
   
-  // Extract year if formatted as (YYYY) or [YYYY]
-  const yearMatch = str.match(/[\(\[](\d{4})[\)\]]/);
-  const year = yearMatch ? yearMatch[1] : undefined;
-
   // Remove file extensions
   str = str.replace(/\.(mp4|mkv|avi|m4v|mov|mp3|flac|aac)$/i, "");
 
-  // Remove common scene tags
+  // Remove common scene tags (added MP4, MKV, AVI, WEB, DL)
   str = str.replace(/BaixarSeriesMP4(\.pm)?/gi, "");
-  str = str.replace(/\b(1080p|720p|480p|2160p|4k|uhd|fhd|hd|web-dl|webdl|bluray|bdrip|dvdrip|x264|x265|hevc|aac|mp3|ddp5\.1|ac3)\b/gi, "");
+  str = str.replace(/\b(1080p|720p|480p|2160p|4k|uhd|fhd|hd|web-dl|webdl|web|dl|bluray|bdrip|dvdrip|x264|x265|hevc|aac|mp3|mp4|mkv|avi|ddp5\.1|ac3)\b/gi, "");
   str = str.replace(/\b(LEG|DUB|DUBLADO|LEGENDADO|NACIONAL)\b/gi, "");
 
   // Remove season / episode tags if present (e.g. S01E02)
   str = str.replace(/S\d+E\d+/gi, "");
   str = str.replace(/S\d+/gi, "");
 
-  // Remove year and parentheses
-  str = str.replace(/[\(\[]\d{4}[\)\]]/g, "");
+  // Extract year. It could be in parentheses (YYYY), brackets [YYYY], or just a standalone 4-digit number (19xx or 20xx) surrounded by dots/spaces.
+  let year: string | undefined = undefined;
+  const yearMatch = str.match(/(?:[\(\[]|^|[._\-\s])((?:19|20)\d{2})(?:[\)\]]|$|[._\-\s])/);
+  if (yearMatch) {
+    year = yearMatch[1];
+    // Remove the year from the string so it doesn't pollute the title query
+    str = str.replace(yearMatch[1], "");
+  }
+
+  // Remove empty parentheses/brackets left behind
+  str = str.replace(/[\(\[\{\}\)\]]/g, " ");
 
   // Replace dots, underscores, dashes with space
   str = str.replace(/[._\-]/g, " ");
