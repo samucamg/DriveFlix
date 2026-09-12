@@ -3,7 +3,7 @@ import { Cipher } from '@fyears/rclone-crypt';
 import { toValidUuid } from './index';
 
 // Sync a single series folder directly into the DB (no self-fetch needed)
-async function syncSeriesFolder(env: any, gdrive: any, rc: any, libraryId: string, seriesId: string, seriesFolderId: string) {
+async function syncSeriesFolder(env: any, gdrive: any, rc: any, libraryId: string, seriesId: string, seriesFolderId: string, seenIds: string[]) {
   const seasonList: any = await gdrive.listFolder(seriesFolderId);
   for (const seasonItem of (seasonList.files || [])) {
     if (seasonItem.mimeType === 'application/vnd.google-apps.folder') {
@@ -12,6 +12,7 @@ async function syncSeriesFolder(env: any, gdrive: any, rc: any, libraryId: strin
       const sMatch = seasonName.match(/S(\d+)|Season\s*(\d+)|Temporada\s*(\d+)/i);
       const seasonNumber = sMatch ? parseInt(sMatch[1] || sMatch[2] || sMatch[3]) : 1;
       const seasonId = `season_${seasonItem.id}`;
+      seenIds.push(seasonId);
 
       await env.DB.prepare(`
         INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId, Uuid)
@@ -26,6 +27,8 @@ async function syncSeriesFolder(env: any, gdrive: any, rc: any, libraryId: strin
         try { epName = await rc.decryptFileName(ep.name); } catch(e) {}
         if (!epName.match(/\.(mp4|mkv|avi|webm|m4v|mov|wmv)$/i)) continue;
         const rowEpId = `ep_${ep.id}`;
+        seenIds.push(rowEpId);
+        
         const epMatch = epName.match(/(?:[Ss]\d+)?\s*[Ee](\d+)|\b\d+x(\d+)\b|\bEp[._\s]*(\d+)\b|(?:^|\D)(\d{1,3})\s*\./i);
         const epNumber = epMatch ? parseInt(epMatch[1] || epMatch[2] || epMatch[3] || epMatch[4]) : 1;
         await env.DB.prepare(`
@@ -41,6 +44,8 @@ async function syncSeriesFolder(env: any, gdrive: any, rc: any, libraryId: strin
       if (!epName.match(/\.(mp4|mkv|avi|webm|m4v|mov|wmv)$/i)) continue;
 
       const defaultSeasonId = `season_${seriesFolderId}_s1`;
+      seenIds.push(defaultSeasonId);
+      
       await env.DB.prepare(`
         INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId, Uuid)
         VALUES (?, ?, ?, 'Season', 'Season 1', 1, ?, ?)
@@ -48,6 +53,8 @@ async function syncSeriesFolder(env: any, gdrive: any, rc: any, libraryId: strin
       `).bind(defaultSeasonId, seriesId, libraryId, seriesFolderId, toValidUuid(defaultSeasonId)).run();
 
       const rowEpId = `ep_${seasonItem.id}`;
+      seenIds.push(rowEpId);
+      
       const epMatch = epName.match(/(?:[Ss]\d+)?\s*[Ee](\d+)|\b\d+x(\d+)\b|\bEp[._\s]*(\d+)\b|(?:^|\D)(\d{1,3})\s*\./i);
       const epNumber = epMatch ? parseInt(epMatch[1] || epMatch[2] || epMatch[3] || epMatch[4]) : 1;
       await env.DB.prepare(`
@@ -82,6 +89,8 @@ export async function runSync(env: any) {
       const topList: any = await gdrive.listFolder(libraryFolderId);
       if (!topList || !topList.files) continue;
 
+      const seenIds: string[] = [];
+
       if (isTvLib) {
         for (const seriesFolder of topList.files) {
           if (seriesFolder.mimeType !== 'application/vnd.google-apps.folder') continue;
@@ -90,13 +99,15 @@ export async function runSync(env: any) {
           if (/^S\d+/i.test(seriesName) || /^Season/i.test(seriesName) || /^Temporada/i.test(seriesName)) continue;
 
           const seriesId = `series_${seriesFolder.id}`;
+          seenIds.push(seriesId);
+          
           await env.DB.prepare(`
             INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FolderId, Uuid)
             VALUES (?, ?, ?, 'Series', ?, ?, ?)
             ON CONFLICT(Id) DO UPDATE SET Name = CASE WHEN Items.TmdbId IS NULL THEN excluded.Name ELSE Items.Name END, FolderId = excluded.FolderId, Uuid = excluded.Uuid
           `).bind(seriesId, libraryId, libraryId, seriesName, seriesFolder.id, toValidUuid(seriesId)).run();
 
-          await syncSeriesFolder(env, gdrive, rc, libraryId, seriesId, seriesFolder.id).catch(err => {
+          await syncSeriesFolder(env, gdrive, rc, libraryId, seriesId, seriesFolder.id, seenIds).catch(err => {
             console.error(`Error syncing series ${seriesName}:`, err);
           });
         }
@@ -110,6 +121,8 @@ export async function runSync(env: any) {
                 try { name = await rc.decryptFileName(sub.name); } catch(e) {}
                 if (!name.match(/\.(mp4|mkv|avi|webm|m4v|mov|wmv)$/i)) continue;
                 const rowId = `movie_${sub.id}`;
+                seenIds.push(rowId);
+                
                 await env.DB.prepare(`
                   INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
                   VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?, ?)
@@ -121,6 +134,8 @@ export async function runSync(env: any) {
               try { name = await rc.decryptFileName(item.name); } catch(e) {}
               if (!name.match(/\.(mp4|mkv|avi|webm|m4v|mov|wmv)$/i)) continue;
               const rowId = `movie_${item.id}`;
+              seenIds.push(rowId);
+              
               await env.DB.prepare(`
                 INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
                 VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?, ?)
@@ -138,6 +153,8 @@ export async function runSync(env: any) {
             try { name = await rc.decryptFileName(item.name); } catch(e) {}
             if (!name.match(/\.(mp3|flac|m4a|ogg|wav|aac)$/i)) continue;
             const rowId = `audio_${item.id}`;
+            seenIds.push(rowId);
+            
             await env.DB.prepare(`
               INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
               VALUES (?, ?, ?, 'Audio', ?, ?, ?, ?, ?)
@@ -148,6 +165,29 @@ export async function runSync(env: any) {
           }
         }
       }
+      
+      // Cleanup items that are no longer in this library
+      if (seenIds.length > 0) {
+        const placeholders = seenIds.map(() => '?').join(',');
+        
+        // SQLite has a limit on parameters per query (usually 999 or 32766). 
+        // We can safely chunk it just in case, but usually a library has a few thousand items at most.
+        // Let's do a batch fetch of existing IDs and delete the missing ones to avoid limit issues.
+        const allLibItems: any = await env.DB.prepare("SELECT Id FROM Items WHERE LibraryId = ?").bind(libraryId).all();
+        const seenSet = new Set(seenIds);
+        const toDelete = (allLibItems.results || []).map((r: any) => r.Id).filter((id: string) => !seenSet.has(id));
+        
+        if (toDelete.length > 0) {
+          console.log(`Deleting ${toDelete.length} stale items from library ${libraryId}`);
+          // Chunk deletions
+          for (let i = 0; i < toDelete.length; i += 50) {
+            const chunk = toDelete.slice(i, i + 50);
+            const chunkPlaceholders = chunk.map(() => '?').join(',');
+            await env.DB.prepare(`DELETE FROM Items WHERE Id IN (${chunkPlaceholders})`).bind(...chunk).run();
+          }
+        }
+      }
+
     } catch (err) {
       console.error(`Error syncing library ${lib.Id}:`, err);
     }

@@ -3604,7 +3604,14 @@ const itemsHandler = async (c: any) => {
     const parsed = parseMediaInfo(row);
     const tmdb = parsed.tmdb || {};
     const container = isAudio ? "mp3" : (row.Name.endsWith(".mkv") ? "mkv" : "mp4");
-    const cleanName = (isSeries || row.Type === "Movie") && tmdb.title ? tmdb.title : row.Name;
+    
+    let cleanName = row.Name;
+    if (isSeries || row.Type === "Movie") {
+      cleanName = tmdb.title || cleanMediaTitle(row.Name).query;
+    } else if (row.Type === "Episode") {
+      cleanName = tmdb.title || cleanEpisodeTitle(row.Name, row.IndexNumber);
+    }
+    
     const yearMatch = row.Name.match(/\((\d{4})\)/);
     const productionYear = tmdb.year || (yearMatch ? parseInt(yearMatch[1]) : 2024);
     const premiereDate = tmdb.releaseDate ? `${tmdb.releaseDate}T00:00:00.0000000Z` : `${productionYear}-01-01T00:00:00.0000000Z`;
