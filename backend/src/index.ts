@@ -180,6 +180,15 @@ async function ensureSchema(db: D1Database) {
       db.prepare(`CREATE TABLE IF NOT EXISTS DebugLogs (
         time TEXT,
         log TEXT
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS UserItemData (
+        UserId TEXT NOT NULL,
+        ItemId TEXT NOT NULL,
+        PlaybackPositionTicks INTEGER DEFAULT 0,
+        Played BOOLEAN DEFAULT 0,
+        IsFavorite BOOLEAN DEFAULT 0,
+        LastPlayedDate DATETIME,
+        PRIMARY KEY (UserId, ItemId)
       )`)
     ]);
 
@@ -704,42 +713,90 @@ app.get("/System/ActivityLog/Entries", (c) =>
 );
 
 app.get("/System/Info/Storage", (c) =>
-  c.json([
-    {
-      Name: "Google Drive (Cloud)",
-      Path: "Google Drive",
-      TotalSpace: 10000000000000,
+  c.json({
+    CacheFolder: {
+      Path: "/cache",
+      DeviceId: "Google Drive (Cloud)",
+      StorageType: "Network",
+      UsedSpace: 120000000,
       FreeSpace: 8500000000000,
     },
-  ]),
+    ImageCacheFolder: {
+      Path: "/config/data/metadata/itemsbyname",
+      DeviceId: "Google Drive (Cloud)",
+      StorageType: "Network",
+      UsedSpace: 350000000,
+      FreeSpace: 8500000000000,
+    },
+    ProgramDataFolder: {
+      Path: "/config",
+      DeviceId: "Cloudflare D1",
+      StorageType: "Fixed",
+      UsedSpace: 25000000,
+      FreeSpace: 10000000000,
+    },
+    LogFolder: {
+      Path: "/config/log",
+      DeviceId: "Cloudflare Workers",
+      StorageType: "Ram",
+      UsedSpace: 5000000,
+      FreeSpace: 128000000,
+    },
+    InternalMetadataFolder: {
+      Path: "/config/data/metadata",
+      DeviceId: "Cloudflare D1",
+      StorageType: "Fixed",
+      UsedSpace: 80000000,
+      FreeSpace: 10000000000,
+    },
+    TranscodingTempFolder: {
+      Path: "/config/transcodes",
+      DeviceId: "RAM Edge",
+      StorageType: "Ram",
+      UsedSpace: 0,
+      FreeSpace: 128000000,
+    },
+    WebFolder: {
+      Path: "/jellyfin-web",
+      DeviceId: "Cloudflare Pages",
+      StorageType: "Fixed",
+      UsedSpace: 45000000,
+      FreeSpace: 10000000000,
+    },
+  })
 );
 
+// Volatile in-memory task state (resets on cold start — perfectly acceptable for serverless)
+let scanTaskState: "Idle" | "Running" = "Idle";
+let scanTaskLastRun = new Date().toISOString();
+let backupTaskState: "Idle" | "Running" = "Idle";
+let backupTaskLastRun = new Date().toISOString();
+
 const getScheduledTasksList = () => {
-  const now = new Date().toISOString();
   return [
     {
       Name: "Escanear Bibliotecas",
-      State: "Idle",
-      CurrentProgressPercentage: 0,
+      State: scanTaskState,
+      CurrentProgressPercentage: scanTaskState === "Running" ? 50 : 0,
       Id: "task_scan_library",
       Description: "Escaneia o Google Drive em busca de novos filmes, séries e músicas",
       Category: "Library",
       IsHidden: false,
-      Key: "ScanMediaLibrary",
+      Key: "RefreshLibrary",
       Triggers: [{ Type: "HourlyTrigger" }],
       LastExecutionResult: {
-        StartTimeUtc: now,
-        EndTimeUtc: now,
+        StartTimeUtc: scanTaskLastRun,
+        EndTimeUtc: scanTaskLastRun,
         Status: "Completed",
         Name: "Escanear Bibliotecas",
-        Key: "ScanMediaLibrary",
+        Key: "RefreshLibrary",
         Id: "task_scan_library",
       },
     },
     {
       Name: "Backup do Banco de Dados",
-      State: "Idle",
-      CurrentProgressPercentage: 0,
+      State: backupTaskState,
+      CurrentProgressPercentage: backupTaskState === "Running" ? 50 : 0,
       Id: "task_backup_database",
       Description: "Exporta backup completo do DriveFlin para a pasta DriveFlin_Backups no Google Drive",
       Category: "Maintenance",
@@ -747,8 +804,8 @@ const getScheduledTasksList = () => {
       Key: "BackupDatabase",
       Triggers: [{ Type: "DailyTrigger", TimeOfDayTicks: 0 }],
       LastExecutionResult: {
-        StartTimeUtc: now,
-        EndTimeUtc: now,
+        StartTimeUtc: backupTaskLastRun,
+        EndTimeUtc: backupTaskLastRun,
         Status: "Completed",
         Name: "Backup do Banco de Dados",
         Key: "BackupDatabase",
@@ -771,9 +828,19 @@ app.get("/ScheduledTasks/:taskId", (c) => {
 app.post("/ScheduledTasks/Running/:taskId", async (c) => {
   const taskId = c.req.param("taskId");
   if (taskId === "task_backup_database") {
-    try { c.executionCtx?.waitUntil(createDatabaseBackup(c.env)); } catch (e) { createDatabaseBackup(c.env); }
+    backupTaskState = "Running";
+    const backupPromise = createDatabaseBackup(c.env).then(() => {
+      backupTaskState = "Idle";
+      backupTaskLastRun = new Date().toISOString();
+    }).catch(() => { backupTaskState = "Idle"; });
+    try { c.executionCtx?.waitUntil(backupPromise); } catch (e) {}
   } else {
-    try { c.executionCtx?.waitUntil(runSync(c.env)); } catch (e) { runSync(c.env); }
+    scanTaskState = "Running";
+    const syncPromise = runSync(c.env).then(() => {
+      scanTaskState = "Idle";
+      scanTaskLastRun = new Date().toISOString();
+    }).catch(() => { scanTaskState = "Idle"; });
+    try { c.executionCtx?.waitUntil(syncPromise); } catch (e) {}
   }
   return c.body(null, 204);
 });
@@ -1230,15 +1297,9 @@ const handlePlayingProgress = async (c: any) => {
     if (rawItemId && positionTicks > 0) {
       const item = await resolveItem(c.env.DB, rawItemId);
       const dbId = item ? item.Id : rawItemId;
-      const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
       await c.env.DB.prepare(
         "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
       ).bind(userId, dbId, positionTicks).run();
-      if (uuidId !== dbId) {
-        await c.env.DB.prepare(
-          "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
-        ).bind(userId, uuidId, positionTicks).run();
-      }
     }
   } catch (e) {}
   return new Response(null, { status: 204 });
@@ -1261,15 +1322,9 @@ const handlePlayingStopped = async (c: any) => {
         } catch (e) {}
       }
       const dbId = item ? item.Id : rawItemId;
-      const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
       await c.env.DB.prepare(
         "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, Played = excluded.Played, LastPlayedDate = excluded.LastPlayedDate"
       ).bind(userId, dbId, played ? 0 : positionTicks, played).run();
-      if (uuidId !== dbId) {
-        await c.env.DB.prepare(
-          "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, Played = excluded.Played, LastPlayedDate = excluded.LastPlayedDate"
-        ).bind(userId, uuidId, played ? 0 : positionTicks, played).run();
-      }
     }
   } catch (e) {}
   return new Response(null, { status: 204 });
@@ -1295,15 +1350,9 @@ app.post("/Users/:userId/PlayingItems/:itemId/Progress", async (c) => {
     if (rawItemId && pos > 0) {
       const item = await resolveItem(c.env.DB, rawItemId);
       const dbId = item ? item.Id : rawItemId;
-      const uuidId = item ? (item.Uuid || toValidUuid(item.Id)) : toValidUuid(rawItemId);
       await c.env.DB.prepare(
         "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
       ).bind(userId, dbId, pos).run();
-      if (uuidId !== dbId) {
-        await c.env.DB.prepare(
-          "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, ?, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = excluded.PlaybackPositionTicks, LastPlayedDate = excluded.LastPlayedDate"
-        ).bind(userId, uuidId, pos).run();
-      }
     }
   } catch (e) {}
   return new Response(null, { status: 204 });
@@ -1321,11 +1370,6 @@ const handlePlayedItem = async (c: any) => {
     await c.env.DB.prepare(
       "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, 0, 1, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = 0, Played = 1, LastPlayedDate = excluded.LastPlayedDate"
     ).bind(userId, dbId).run();
-    if (uuidId !== dbId) {
-      await c.env.DB.prepare(
-        "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, 0, 1, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = 0, Played = 1, LastPlayedDate = excluded.LastPlayedDate"
-      ).bind(userId, uuidId).run();
-    }
   } catch (e) {}
   return c.json({
     PlaybackPositionTicks: 0,
@@ -1350,11 +1394,6 @@ const handleUnplayedItem = async (c: any) => {
     await c.env.DB.prepare(
       "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, 0, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = 0, Played = 0, LastPlayedDate = excluded.LastPlayedDate"
     ).bind(userId, dbId).run();
-    if (uuidId !== dbId) {
-      await c.env.DB.prepare(
-        "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, LastPlayedDate) VALUES (?, ?, 0, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET PlaybackPositionTicks = 0, Played = 0, LastPlayedDate = excluded.LastPlayedDate"
-      ).bind(userId, uuidId).run();
-    }
   } catch (e) {}
   return c.json({
     PlaybackPositionTicks: 0,
@@ -1379,11 +1418,6 @@ const handleFavoriteItem = async (c: any) => {
     await c.env.DB.prepare(
       "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate) VALUES (?, ?, 0, 0, 1, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET IsFavorite = 1"
     ).bind(userId, dbId).run();
-    if (uuidId !== dbId) {
-      await c.env.DB.prepare(
-        "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate) VALUES (?, ?, 0, 0, 1, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET IsFavorite = 1"
-      ).bind(userId, uuidId).run();
-    }
   } catch (e) {}
   return c.json({
     PlaybackPositionTicks: 0,
@@ -1407,11 +1441,6 @@ const handleUnfavoriteItem = async (c: any) => {
     await c.env.DB.prepare(
       "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate) VALUES (?, ?, 0, 0, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET IsFavorite = 0"
     ).bind(userId, dbId).run();
-    if (uuidId !== dbId) {
-      await c.env.DB.prepare(
-        "INSERT INTO UserItemData (UserId, ItemId, PlaybackPositionTicks, Played, IsFavorite, LastPlayedDate) VALUES (?, ?, 0, 0, 0, datetime('now')) ON CONFLICT(UserId, ItemId) DO UPDATE SET IsFavorite = 0"
-      ).bind(userId, uuidId).run();
-    }
   } catch (e) {}
   return c.json({
     PlaybackPositionTicks: 0,
@@ -2385,11 +2414,16 @@ const handleResume = async (c: any) => {
     }
 
     const { results } = await c.env.DB.prepare(`
-      SELECT u.PlaybackPositionTicks, u.Played, u.IsFavorite, u.LastPlayedDate, i.* 
+      SELECT MAX(u.PlaybackPositionTicks) as PlaybackPositionTicks, 
+             MAX(u.Played) as Played, 
+             MAX(u.IsFavorite) as IsFavorite, 
+             MAX(u.LastPlayedDate) as LastPlayedDate, 
+             i.* 
       FROM UserItemData u 
       JOIN Items i ON (u.ItemId = i.Id OR u.ItemId = i.Uuid)
       WHERE u.UserId = ? AND u.Played = 0 AND u.PlaybackPositionTicks > 0 ${typeFilter}
-      ORDER BY u.LastPlayedDate DESC LIMIT 16
+      GROUP BY i.Id
+      ORDER BY MAX(u.LastPlayedDate) DESC LIMIT 16
     `).bind(userId).all();
 
     if (!results.length) return c.json({ Items: [], TotalRecordCount: 0 });
@@ -3371,6 +3405,7 @@ const itemsHandler = async (c: any) => {
   }
 
   let results: any[] = [];
+  let totalRecordCount = 0;
 
   if (ids) {
     const idList = ids.split(",").map((s: string) => s.trim()).filter(Boolean);
@@ -3378,30 +3413,20 @@ const itemsHandler = async (c: any) => {
     const query = await c.env.DB.prepare(`SELECT * FROM Items WHERE Id IN (${placeholders}) OR Uuid IN (${placeholders})`);
     const { results: res } = await query.bind(...idList, ...idList).all();
     results = res;
+    totalRecordCount = res.length;
   } else if (searchTerm) {
     const words = searchTerm.split(/\s+/).filter(Boolean);
     let sql = "SELECT * FROM Items WHERE ";
     const bindParams: any[] = [];
     const wordClauses = words.map((w: string) => {
       const patterns = getSearchPatterns(w);
-      for (const p of patterns) {
-        bindParams.push(p, p);
-      }
-      return `(${patterns.map(() => "(Name LIKE ? OR Overview LIKE ?)").join(" OR ")})`;
+      const subClauses = patterns.map(p => {
+        bindParams.push(`%${p}%`);
+        return "Name LIKE ?";
+      });
+      return `(${subClauses.join(" OR ")})`;
     });
-    sql += `(${wordClauses.join(" AND ")})`;
-
-    if (parentId) {
-      let realParentId = parentId;
-      const parentLib = await resolveLibrary(c.env.DB, parentId);
-      if (parentLib) realParentId = parentLib.Id;
-      else {
-        const parentItem = await resolveItem(c.env.DB, parentId);
-        if (parentItem) realParentId = parentItem.Id;
-      }
-      sql += " AND (ParentId = ? OR LibraryId = ? OR ParentId = ? OR LibraryId = ?)";
-      bindParams.push(realParentId, realParentId, parentId, parentId);
-    }
+    sql += wordClauses.join(" AND ");
 
     if (includeItemTypes.length > 0) {
       const placeholders = includeItemTypes.map(() => "?").join(",");
@@ -3414,6 +3439,10 @@ const itemsHandler = async (c: any) => {
     } else {
       sql += " AND Type != 'Season'";
     }
+
+    const countSql = sql.replace(/^SELECT \* FROM Items/i, "SELECT COUNT(*) as c FROM Items");
+    const countRes: any = await c.env.DB.prepare(countSql).bind(...bindParams).first();
+    totalRecordCount = countRes ? countRes.c : 0;
 
     sql += " ORDER BY Name ASC LIMIT ? OFFSET ?";
     bindParams.push(limit, startIndex);
@@ -3438,6 +3467,10 @@ const itemsHandler = async (c: any) => {
       sql += " AND (ParentId = ? OR LibraryId = ?)";
       bindParams.push(realParent, realParent);
     }
+    const countSql = sql.replace(/^SELECT \* FROM Items/i, "SELECT COUNT(*) as c FROM Items");
+    const countRes: any = await c.env.DB.prepare(countSql).bind(...bindParams).first();
+    totalRecordCount = countRes ? countRes.c : 0;
+
     sql += " ORDER BY Name ASC LIMIT ? OFFSET ?";
     bindParams.push(limit, startIndex);
     const { results: res } = await c.env.DB.prepare(sql).bind(...bindParams).all();
@@ -3467,6 +3500,11 @@ const itemsHandler = async (c: any) => {
       // Library root: only show Movie, Series, Audio (never loose Season or Episode)
       sql += " AND Type IN ('Movie', 'Series', 'Audio')";
     }
+    
+    const countSql = sql.replace(/^SELECT \* FROM Items/i, "SELECT COUNT(*) as c FROM Items");
+    const countRes: any = await c.env.DB.prepare(countSql).bind(...bindParams).first();
+    totalRecordCount = countRes ? countRes.c : 0;
+
     sql += " ORDER BY Name ASC LIMIT ? OFFSET ?";
     bindParams.push(limit, startIndex);
 
@@ -3486,6 +3524,11 @@ const itemsHandler = async (c: any) => {
     } else {
       sql += "Type IN ('Movie', 'Series', 'Audio')";
     }
+    
+    const countSql = sql.replace(/^SELECT \* FROM Items/i, "SELECT COUNT(*) as c FROM Items");
+    const countRes: any = await c.env.DB.prepare(countSql).bind(...bindParams).first();
+    totalRecordCount = countRes ? countRes.c : 0;
+
     sql += " ORDER BY Name ASC LIMIT ? OFFSET ?";
     bindParams.push(limit, startIndex);
 
@@ -3592,12 +3635,167 @@ const itemsHandler = async (c: any) => {
 
   return c.json({
     Items: jellyfinItems,
-    TotalRecordCount: jellyfinItems.length,
-    StartIndex: 0,
+    TotalRecordCount: totalRecordCount,
+    StartIndex: startIndex,
   });
 };
 
+app.post("/internal/syncLibrary", async (c) => {
+  try {
+    const { libId, folderId, isTvLib, isMovieLib, isMusicLib } = await c.req.json();
+    const { GoogleDrive } = require('./gdrive');
+    const { Cipher } = require('@fyears/rclone-crypt');
+    const { toValidUuid } = require('./index');
+    const gdrive = new GoogleDrive(c.env);
+    const rc = new Cipher('base32');
+    rc.dirNameEncrypt = false;
+    if (c.env.RCLONE_PASS) await rc.key(c.env.RCLONE_PASS, c.env.RCLONE_SALT || '');
+
+    const topList: any = await gdrive.listFolder(folderId);
+    if (!topList || !topList.files) return c.json({ success: true });
+
+    if (isTvLib) {
+      for (const seriesFolder of topList.files) {
+        if (seriesFolder.mimeType !== 'application/vnd.google-apps.folder') continue;
+        let seriesName = seriesFolder.name;
+        try { seriesName = await rc.decryptFileName(seriesFolder.name); } catch(e) {}
+        if (/^S\d+/i.test(seriesName) || /^Season/i.test(seriesName) || /^Temporada/i.test(seriesName)) continue;
+
+        const seriesId = `series_${seriesFolder.id}`;
+        await c.env.DB.prepare(`
+          INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FolderId, Uuid)
+          VALUES (?, ?, ?, 'Series', ?, ?, ?)
+          ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+        `).bind(seriesId, libId, libId, seriesName, seriesFolder.id, toValidUuid(seriesId)).run();
+
+        const url = new URL(c.req.url);
+        url.pathname = '/internal/syncSeries';
+        const syncPromise = fetch(url.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ libraryId: libId, seriesId, seriesFolderId: seriesFolder.id })
+        });
+        c.executionCtx?.waitUntil(syncPromise);
+      }
+    } else if (isMovieLib) {
+      for (const item of topList.files) {
+        try {
+          if (item.mimeType === 'application/vnd.google-apps.folder') {
+            const subFiles: any = await gdrive.listFolder(item.id);
+            for (const sub of (subFiles.files || [])) {
+              let name = sub.name;
+              try { name = await rc.decryptFileName(sub.name); } catch(e) {}
+              if (name.match(/\.(mp4|mkv|avi|webm|m4v|mov|wmv)$/i)) {
+                const rowId = `movie_${sub.id}`;
+                await c.env.DB.prepare(`
+                  INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
+                  VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?, ?)
+                  ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
+                `).bind(rowId, libId, libId, name, sub.id, sub.name, sub.size || 0, toValidUuid(rowId)).run();
+              }
+            }
+          } else {
+            let name = item.name;
+            try { name = await rc.decryptFileName(item.name); } catch(e) {}
+            if (name.match(/\.(mp4|mkv|avi|webm|m4v|mov|wmv)$/i)) {
+              const rowId = `movie_${item.id}`;
+              await c.env.DB.prepare(`
+                INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, FileId, EncryptedName, Size, Uuid)
+                VALUES (?, ?, ?, 'Movie', ?, ?, ?, ?, ?)
+                ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, Size = excluded.Size, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Uuid = excluded.Uuid
+              `).bind(rowId, libId, libId, name, item.id, item.name, item.size || 0, toValidUuid(rowId)).run();
+            }
+          }
+        } catch (err) {}
+      }
+    }
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message, stack: err.stack }, 500);
+  }
+});
+
+app.post("/internal/syncSeries", async (c) => {
+  try {
+    const { libraryId, seriesId, seriesFolderId } = await c.req.json();
+    const { GoogleDrive } = require('./gdrive');
+    const { Cipher } = require('@fyears/rclone-crypt');
+    const { toValidUuid } = require('./index');
+    const gdrive = new GoogleDrive(c.env);
+    const rc = new Cipher('base32');
+    rc.dirNameEncrypt = false;
+    if (c.env.RCLONE_PASS) await rc.key(c.env.RCLONE_PASS, c.env.RCLONE_SALT || '');
+
+    const seasonList: any = await gdrive.listFolder(seriesFolderId);
+    for (const seasonItem of (seasonList.files || [])) {
+      if (seasonItem.mimeType === 'application/vnd.google-apps.folder') {
+        let seasonName = seasonItem.name;
+        try { seasonName = await rc.decryptFileName(seasonItem.name); } catch(e) {}
+        const sMatch = seasonName.match(/S(\d+)|Season\s*(\d+)|Temporada\s*(\d+)/i);
+        const seasonNumber = sMatch ? parseInt(sMatch[1] || sMatch[2] || sMatch[3]) : 1;
+        const seasonId = `season_${seasonItem.id}`;
+
+        await c.env.DB.prepare(`
+          INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId, Uuid)
+          VALUES (?, ?, ?, 'Season', ?, ?, ?, ?)
+          ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+        `).bind(seasonId, seriesId, libraryId, seasonName, seasonNumber, seasonItem.id, toValidUuid(seasonId)).run();
+
+        const epList: any = await gdrive.listFolder(seasonItem.id);
+        for (const ep of (epList.files || [])) {
+          if (ep.mimeType === 'application/vnd.google-apps.folder') continue;
+          let epName = ep.name;
+          try { epName = await rc.decryptFileName(ep.name); } catch(e) {}
+          const rowEpId = `ep_${ep.id}`;
+          if (epName.match(/\.(mp4|mkv|avi|webm|m4v|mov|wmv)$/i)) {
+            const epMatch = epName.match(/(?:[Ss]\d+)?\s*[Ee](\d+)|\b\d+x(\d+)\b|\bEp[._\s]*(\d+)\b|(?:^|\D)(\d{1,3})\s*\./i);
+            const epNumber = epMatch ? parseInt(epMatch[1] || epMatch[2] || epMatch[3] || epMatch[4]) : 1;
+            await c.env.DB.prepare(`
+              INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size, Uuid)
+              VALUES (?, ?, ?, 'Episode', ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
+            `).bind(rowEpId, seasonId, libraryId, epName, epNumber, seasonNumber, ep.id, ep.name, ep.size || 0, toValidUuid(rowEpId)).run();
+          }
+        }
+      } else {
+        let epName = seasonItem.name;
+        try { epName = await rc.decryptFileName(seasonItem.name); } catch(e) {}
+        if (epName.match(/\.(mp4|mkv|avi|webm|m4v|mov|wmv)$/i)) {
+          const defaultSeasonId = `season_${seriesFolderId}_s1`;
+          await c.env.DB.prepare(`
+            INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, FolderId, Uuid)
+            VALUES (?, ?, ?, 'Season', 'Season 1', 1, ?, ?)
+            ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, FolderId = excluded.FolderId, Uuid = excluded.Uuid
+          `).bind(defaultSeasonId, seriesId, libraryId, seriesFolderId, toValidUuid(defaultSeasonId)).run();
+
+          const rowEpId = `ep_${seasonItem.id}`;
+          const epMatch = epName.match(/(?:[Ss]\d+)?\s*[Ee](\d+)|\b\d+x(\d+)\b|\bEp[._\s]*(\d+)\b|(?:^|\D)(\d{1,3})\s*\./i);
+          const epNumber = epMatch ? parseInt(epMatch[1] || epMatch[2] || epMatch[3] || epMatch[4]) : 1;
+          await c.env.DB.prepare(`
+            INSERT INTO Items (Id, ParentId, LibraryId, Type, Name, IndexNumber, ParentIndexNumber, FileId, EncryptedName, Size, Uuid)
+            VALUES (?, ?, ?, 'Episode', ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(Id) DO UPDATE SET Name = excluded.Name, IndexNumber = excluded.IndexNumber, ParentIndexNumber = excluded.ParentIndexNumber, FileId = excluded.FileId, EncryptedName = excluded.EncryptedName, Size = excluded.Size, Uuid = excluded.Uuid
+          `).bind(rowEpId, defaultSeasonId, libraryId, epName, epNumber, 1, seasonItem.id, seasonItem.name, seasonItem.size || 0, toValidUuid(rowEpId)).run();
+        }
+      }
+    }
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message, stack: err.stack }, 500);
+  }
+});
+
 app.get("/Items", itemsHandler);
+
+app.get("/Debug/ListFolder/:id", async (c) => {
+  const gdrive = new GoogleDrive(c.env);
+  try {
+    const res = await gdrive.listFolder(c.req.param("id"));
+    return c.json(res);
+  } catch (err: any) {
+    return c.json({ error: err.message });
+  }
+});
 app.get("/items", itemsHandler);
 app.get("/Users/:userId/Items", itemsHandler);
 app.get("/users/:userId/items", itemsHandler);
@@ -4049,7 +4247,7 @@ app.post("/Items/RemoteSearch/MusicArtist", (c) => c.json([]));
 app.post("/items/remotesearch/musicartist", (c) => c.json([]));
 
 // Apply Remote Search Result to an item
-app.post("/Items/RemoteSearch/Apply/:itemId", async (c) => {
+const handleRemoteSearchApply = async (c: any) => {
   const itemId = c.req.param("itemId");
   const replaceAllImages = c.req.query("replaceAllImages") !== "false";
   let searchResult: any = {};
@@ -4057,12 +4255,14 @@ app.post("/Items/RemoteSearch/Apply/:itemId", async (c) => {
     searchResult = await c.req.json();
   } catch (e) {}
 
-  const item: any = await c.env.DB.prepare("SELECT * FROM Items WHERE Id = ?").bind(itemId).first();
+  const item: any = await resolveItem(c.env.DB, itemId);
   if (!item) {
     return c.notFound();
   }
+  // Use canonical internal Id for all subsequent DB operations
+  const canonicalId = item.Id;
 
-  const tmdbId = searchResult.ProviderIds?.Tmdb || searchResult.ProviderIds?.tmdb;
+  const tmdbId = searchResult.ProviderIds?.Tmdb || searchResult.ProviderIds?.tmdb || searchResult.providerIds?.Tmdb || searchResult.providerIds?.tmdb;
   let fullDetails = null;
   if (tmdbId) {
     fullDetails = await getTmdbDetails(
@@ -4121,12 +4321,13 @@ app.post("/Items/RemoteSearch/Apply/:itemId", async (c) => {
     primaryImage,
     backdropImage,
     updatedMediaInfoStr,
-    itemId
+    canonicalId
   ).run();
 
   return c.body(null, 204);
-});
-
+};
+app.post("/Items/RemoteSearch/Apply/:itemId", handleRemoteSearchApply);
+app.post("/items/remotesearch/apply/:itemId", handleRemoteSearchApply);
 
 // Shows NextUp endpoint
 const handleNextUp = async (c: any) => {
@@ -4145,13 +4346,23 @@ const handleNextUp = async (c: any) => {
     }
   }
 
-  let sql = "SELECT * FROM Items WHERE Type = 'Episode' AND Id NOT IN (SELECT ItemId FROM UserItemData WHERE UserId = ? AND Played = 1)";
-  const params: any[] = [userId];
+  let sql = `
+    SELECT * FROM (
+      SELECT Items.*, ROW_NUMBER() OVER (
+        PARTITION BY (SELECT ParentId FROM Items AS Seasons WHERE Seasons.Id = Items.ParentId) 
+        ORDER BY ParentIndexNumber ASC, IndexNumber ASC
+      ) as rn
+      FROM Items 
+      WHERE Type = 'Episode' 
+        AND Id NOT IN (SELECT ItemId FROM UserItemData WHERE UserId = ? AND Played = 1) 
+        AND COALESCE(Uuid,'') NOT IN (SELECT ItemId FROM UserItemData WHERE UserId = ? AND Played = 1)
+  `;
+  const params: any[] = [userId, userId];
   if (seriesId) {
     sql += " AND ParentId IN (SELECT Id FROM Items WHERE ParentId = ?)";
     params.push(seriesId);
   }
-  sql += " ORDER BY ParentIndexNumber ASC, IndexNumber ASC LIMIT 10";
+  sql += ") WHERE rn = 1 ORDER BY DateCreated DESC LIMIT 10";
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
 
   const itemIds = results.map((r: any) => r.Id);
