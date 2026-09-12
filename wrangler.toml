@@ -5,9 +5,35 @@ compatibility_date = "2024-04-05"
 [assets]
 directory = "public"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Variables shown as input fields during the Cloudflare Deploy Button setup.
+# Fill in your values in the Cloudflare dashboard (Settings > Variables and Secrets)
+# or through the "Deploy to Cloudflare" button below in the README.
+# ─────────────────────────────────────────────────────────────────────────────
+[vars]
+# Required: Free API key from https://www.themoviedb.org/settings/api
+TMDB_API_KEY = ""
+
+# Required: From https://generator.driveflin.org (Google Drive OAuth)
+GDRIVE_CLIENT_ID     = ""
+GDRIVE_CLIENT_SECRET = ""
+GDRIVE_REFRESH_TOKEN = ""
+
+# Optional: ID of a Google Shared/Team Drive (leave empty for personal Drive)
+GDRIVE_TEAM_DRIVE_ID = ""
+
+# Optional: Custom admin password (default: admin)
+ADMIN_PASSWORD = ""
+
+# Optional: Rclone Crypt settings (only if your files are encrypted via rclone)
+RCLONE_PASS = ""
+RCLONE_SALT = ""
+
 [[d1_databases]]
 binding = "DB"
 database_name = "jellyfin_db_prod"
+# Note: no database_id — Cloudflare creates and links the DB automatically
+# during the Deploy Button flow or the first time wrangler deploy runs.
 
 # Auto-scan Google Drive libraries every hour
 [triggers]

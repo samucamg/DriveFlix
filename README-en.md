@@ -116,86 +116,83 @@ flowchart TD
 
 ---
 
-## 🚀 Visual Cloudflare Setup & Deployment Guide (Recommended via Web)
+## 🚀 Installation — 1-Click Deploy Button
 
-Setup is 100% visual via your web browser, with no local CLI tools or command-line commands required.
-
-### Step 1: Fork the Repository on GitHub
-1. In the upper-right corner of this GitHub repository page, click **Fork**.
-2. Select your personal GitHub account and click **Create fork**.
-3. You now have an independent, personal copy of DriveFlin in your own GitHub account.
+There are **two ways** to deploy DriveFlin. The simplest is the **Deploy Button below**, which opens a Cloudflare setup wizard, shows all configuration fields as a form (including your TMDB API Key and Google Drive credentials), and does everything automatically.
 
 ---
 
-### Step 2: Create the D1 Database on Cloudflare (Takes 10 Seconds)
-> [!NOTE]
-> The D1 database is the serverless storage where DriveFlin keeps your media libraries, metadata, and watch progress. It should be created in your account prior to deployment so Cloudflare links it automatically by name.
+### ⚡ Option A: Deploy with 1 Click (Recommended)
 
-1. Log in to the Cloudflare dashboard: [dash.cloudflare.com](https://dash.cloudflare.com).
-2. In the left sidebar, navigate to **Storage & Databases** > **D1 SQL Database**.
-3. Click **Create database**.
-4. Under **Database name**, enter exactly: `jellyfin_db_prod`
-5. Click **Create**. That's it!
+<p align="center">
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/samucamg/DriveFlin" target="_blank">
+    <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" />
+  </a>
+</p>
 
 > [!TIP]
-> **100% Built-In Automatic Database Initialization:**  
-> You do **NOT** need to open a SQL console, run terminal commands, or paste SQL scripts! DriveFlin automatically detects the new database and creates all tables, columns, indexes, and the default administrator account (`admin` / `admin`) on the very first time you open the site.
+> **What this button does automatically:**
+> - ✅ **Forks** the repository to your GitHub account
+> - ✅ Creates the **D1 database** (`jellyfin_db_prod`) in your Cloudflare account
+> - ✅ Shows **input fields** for you to fill in your credentials before deploying:
+>   - `TMDB_API_KEY` (TheMovieDB API key)
+>   - `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN` (Google Drive connection)
+>   - Optional variables (admin password, Shared Drive, Rclone Crypt)
+> - ✅ **Deploys** the Worker with everything configured at once
+
+**Before clicking, have these ready:**
+
+| What you need | Where to get it |
+| :--- | :--- |
+| 🔑 **TMDB API Key** | Free account at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) |
+| 🔗 **Google Drive OAuth** (Client ID, Secret, Refresh Token) | Free generator at [generator.driveflin.org](https://generator.driveflin.org) |
+| ☁️ **Cloudflare account** (free) | Sign up at [cloudflare.com](https://cloudflare.com) |
 
 ---
 
-### Step 3: Connect Your Application to Cloudflare Workers & Pages
-1. In the left sidebar, navigate to **Workers & Pages**.
-2. Click the blue **Create application** button in the upper-right corner.
-3. In the *"Make something new"* modal, select **Connect GitHub** (or *Import a repository*).
-4. Under **Select a repository**:
-   - Select your GitHub account.
-   - Find and click on the **`DriveFlin`** repository (your fork).
-   - Click **Next**.
-5. On the **Set up your application** screen:
-   - **Project name:** `driveflin` *(or your preferred name)*.
-   - **Deploy command:** `npx wrangler deploy` *(pre-filled)*.
-   - Click the blue **Deploy** button!
-6. Cloudflare will start the build, detect the root `wrangler.toml`, and automatically link your `jellyfin_db_prod` database!
+### 🛠️ Option B: Manual Deploy via Cloudflare Workers & Pages (GitHub Import)
+
+If you prefer to connect your fork manually to Cloudflare:
+
+**Step 1: Fork**  
+Click **Fork** in the top-right of this page and create your own copy of DriveFlin.
+
+**Step 2: Create the D1 Database**  
+In the [Cloudflare dashboard](https://dash.cloudflare.com), go to **Storage & Databases > D1 SQL Database > Create database**.  
+Database name (exact): `jellyfin_db_prod`
+
+> [!TIP]
+> **Auto-Initialization:** You do NOT need to run SQL. DriveFlin automatically creates all tables the first time you open the site.
+
+**Step 3: Connect in Workers & Pages**  
+Go to **Workers & Pages > Create application > Connect GitHub**, select your `DriveFlin` fork, and click **Deploy**.
+
+**Step 4: Add Your Credentials**  
+After deployment, go to **Settings > Variables and Secrets** and add:
+
+| Variable | Type | Description |
+| :--- | :--- | :--- |
+| `TMDB_API_KEY` | Secret | 🔑 Free key from [TheMovieDB](https://www.themoviedb.org/settings/api). **Required.** |
+| `GDRIVE_CLIENT_ID` | Secret | Client ID from Google Cloud Console |
+| `GDRIVE_CLIENT_SECRET` | Secret | Client Secret from Google Cloud Console |
+| `GDRIVE_REFRESH_TOKEN` | Secret | Refresh Token from [generator.driveflin.org](https://generator.driveflin.org) |
+| `ADMIN_PASSWORD` | Secret | *(Optional)* Admin password (default: `admin`) |
+| `GDRIVE_TEAM_DRIVE_ID` | Secret | *(Optional)* Shared/Team Drive ID |
+| `RCLONE_PASS` | Secret | *(Optional)* Rclone Crypt password |
+| `RCLONE_SALT` | Secret | *(Optional)* Rclone Crypt salt |
+
+Click **Save and Deploy**.
 
 > [!NOTE]
 > **Database binding error?**  
-> If the deployment fails saying the database was not found, go to **Settings > Bindings > Add binding > D1 Database**, set variable name to `DB`, and select `jellyfin_db_prod`. Then click **Retry deployment**.
+> Go to **Settings > Bindings > Add binding > D1 Database**, set variable name to `DB`, select `jellyfin_db_prod`, then click **Retry deployment**.
 
 ---
 
-### Step 4: Add Media Variables and Secrets (Required)
-Once the initial deployment completes, add your Google Drive and TMDB credentials:
-
-1. In your Worker's dashboard (`driveflin`), navigate to **Settings** > **Variables and Secrets**.
-2. Click **Add** and insert the following variables:
-
-   | Variable / Secret | Type | Description |
-   | :--- | :--- | :--- |
-   | `TMDB_API_KEY` | Secret | 🔑 Free API Key from [TheMovieDB](https://www.themoviedb.org/settings/api). **Required for metadata and posters.** |
-   | `GDRIVE_CLIENT_ID` | Secret | Client ID generated in the Google Cloud Console. |
-   | `GDRIVE_CLIENT_SECRET` | Secret | Client Secret generated in the Google Cloud Console. |
-   | `GDRIVE_REFRESH_TOKEN` | Secret | Refresh Token generated at [generator.driveflin.org](https://generator.driveflin.org). |
-   | `ADMIN_PASSWORD` | Secret | *(Optional)* Admin password. If omitted, defaults to `admin`. |
-   | `GDRIVE_TEAM_DRIVE_ID` | Secret | *(Optional)* Google Shared/Team Drive ID (leave blank if using personal My Drive). |
-   | `RCLONE_PASS` | Secret | *(Optional)* Password if your Google Drive files use Rclone Crypt. |
-   | `RCLONE_SALT` | Secret | *(Optional)* Salt if your Google Drive files use Rclone Crypt. |
-
-3. Click **Save and Deploy** to apply the changes.
-
-> [!TIP]
-> **Get your free TMDB API Key:**  
-> Go to [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api), create a free account, and copy either the "API Read Access Token" or the "API Key (v3 auth)". DriveFlin uses it to automatically fetch posters, overviews, and metadata for all your movies and TV shows.
-
----
-
-### Step 5: Access the Web Interface and Configure Your Libraries
-1. Open your Worker's global public URL in your browser:  
-   `https://driveflin.your-subdomain.workers.dev/web/index.html`
-2. **Automatic Initial Login:**
-   - **Username:** `admin`
-   - **Password:** `admin`
-3. Open the **Dashboard** (User avatar icon > Dashboard) > **Libraries**.
-4. Click **+ Add Media Library**, select your content type (Movies, TV Shows, or Music), and pick your Google Drive folders directly through the visual folder browser!
+### Final Step: Access the Interface
+1. Open your Worker's URL: `https://driveflin.your-subdomain.workers.dev/web/index.html`
+2. **Initial login:** Username `admin` / Password `admin`
+3. Go to **Dashboard > Libraries > + Add Media Library** and select your Google Drive folders!
 
 ---
 
