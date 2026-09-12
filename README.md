@@ -143,13 +143,13 @@ A instalação é 100% visual pelo navegador, sem necessidade de instalar ferram
 
 ---
 
-### Passo 3: Conectar a Aplicação no Cloudflare Workers
+### Passo 3: Conectar a Aplicação no Cloudflare Workers & Pages
 1. No menu lateral esquerdo da Cloudflare, vá em **Workers & Pages**.
 2. Clique no botão azul **Create application** (Criar aplicativo) no canto superior direito.
 3. Na janela *"Make something new"*, selecione a opção **Connect GitHub** (ou *Import a repository*).
 4. Em **Select a repository**:
    - Selecione a sua conta do GitHub.
-   - Encontre e clique no repositório **`DriveFlin`**.
+   - Encontre e clique no repositório **`DriveFlin`** (o seu fork).
    - Clique em **Next** (Avançar).
 5. Na tela **Set up your application**:
    - **Project name:** `driveflin` *(ou o nome que preferir)*.
@@ -157,29 +157,34 @@ A instalação é 100% visual pelo navegador, sem necessidade de instalar ferram
    - Clique no botão azul **Deploy**!
 6. A Cloudflare iniciará a compilação, detectará o arquivo `wrangler.toml` na raiz e conectará automaticamente o seu banco `jellyfin_db_prod`!
 
+> [!NOTE]
+> **E se der erro de banco não encontrado?**  
+> Acesse **Settings > Bindings > Add binding > D1 Database**, informe o nome de variável `DB` e selecione o banco `jellyfin_db_prod`. Depois clique em **Retry deployment**.
+
 ---
 
-### Passo 4: Configurar as Variáveis e Segredos
+### Passo 4: Configurar as Variáveis e Segredos (Obrigatório)
 Após a implantação, adicione suas chaves de API e conexão do Google Drive:
 
 1. No painel do seu Worker recém-criado (`driveflin`), vá em **Settings** (Configurações) > **Variables and Secrets** (Variáveis e Segredos).
 2. Clique em **Add** (Adicionar) e insira as seguintes variáveis:
+
    | Variável / Segredo | Tipo | Descrição |
    | :--- | :--- | :--- |
+   | `TMDB_API_KEY` | Secret | 🔑 Chave de API gratuita do [TheMovieDB](https://www.themoviedb.org/settings/api). **Obrigatória para metadados e capas.** |
    | `GDRIVE_CLIENT_ID` | Secret | Client ID obtido no Google Cloud Console. |
    | `GDRIVE_CLIENT_SECRET` | Secret | Client Secret obtido no Google Cloud Console. |
-   | `GDRIVE_REFRESH_TOKEN` | Secret | Refresh Token obtido no [generator.driveflin.org](https://generator.driveflin.org). |
-   | `TMDB_API_KEY` | Secret / Texto | Chave de API gratuita do [TheMovieDB](https://www.themoviedb.org/settings/api). |
-   | `ADMIN_PASSWORD` | Secret / Texto | *(Opcional)* Senha do admin. Se omitido, o padrão é `admin`. |
-   | `GDRIVE_TEAM_DRIVE_ID` | Secret / Texto | *(Opcional)* ID do Drive Compartilhado (Shared/Team Drive). |
+   | `GDRIVE_REFRESH_TOKEN` | Secret | Refresh Token obtido em [generator.driveflin.org](https://generator.driveflin.org). |
+   | `ADMIN_PASSWORD` | Secret | *(Opcional)* Senha do admin. Se omitido, o padrão é `admin`. |
+   | `GDRIVE_TEAM_DRIVE_ID` | Secret | *(Opcional)* ID do Drive Compartilhado (Shared/Team Drive). |
    | `RCLONE_PASS` | Secret | *(Opcional)* Senha caso seus arquivos no Drive usem Rclone Crypt. |
    | `RCLONE_SALT` | Secret | *(Opcional)* Salt caso seus arquivos usem Rclone Crypt. |
 
 3. Clique em **Save and Deploy** (Salvar e implantar).
 
-> [!NOTE]
-> **E se eu esquecer de criar o banco antes do deploy?**  
-> Se o deploy der erro de banco não encontrado, basta criar o banco `jellyfin_db_prod` no menu **Storage & Databases > D1 SQL Database** e depois clicar em **Retry deployment** (ou ir em **Settings > Bindings > Add binding > D1 Database**, nome da variável `DB`, e selecionar seu banco).
+> [!TIP]
+> **Obtenha sua TMDB API Key de graça:**  
+> Acesse [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api), crie uma conta gratuita e copie a chave "API Read Access Token" ou "API Key (v3 auth)". O DriveFlin usa ela para buscar automaticamente capas, sinopses e metadados de todos os seus filmes e séries.
 
 ---
 
@@ -212,11 +217,11 @@ npx wrangler d1 create jellyfin_db_prod
 # 4. Executar o schema inicial
 npx wrangler d1 execute jellyfin_db_prod --remote --file=schema.sql
 
-# 5. Configurar os segredos
+# 5. Configurar os segredos (incluindo TMDB_API_KEY)
+npx wrangler secret put TMDB_API_KEY
 npx wrangler secret put GDRIVE_CLIENT_ID
 npx wrangler secret put GDRIVE_CLIENT_SECRET
 npx wrangler secret put GDRIVE_REFRESH_TOKEN
-npx wrangler secret put TMDB_API_KEY
 
 # 6. Publicar o Worker
 npx wrangler deploy

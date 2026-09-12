@@ -5,9 +5,6 @@ compatibility_date = "2024-04-05"
 [assets]
 directory = "public"
 
-[vars]
-TMDB_API_KEY = "844dba0bfd8f3a4f3799f6130ef9e335"
-
 [[d1_databases]]
 binding = "DB"
 database_name = "jellyfin_db_prod"
