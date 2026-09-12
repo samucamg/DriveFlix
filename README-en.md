@@ -127,29 +127,43 @@ Setup is 100% visual via your web browser, with no local CLI tools or command-li
 
 ---
 
-### Step 2: Connect Your Repository to Cloudflare Workers
+### Step 2: Create the D1 Database on Cloudflare (Takes 10 Seconds)
+> [!NOTE]
+> The D1 database is the serverless storage where DriveFlin keeps your media libraries, metadata, and watch progress. It should be created in your account prior to deployment so Cloudflare links it automatically by name.
+
 1. Log in to the Cloudflare dashboard: [dash.cloudflare.com](https://dash.cloudflare.com).
-2. In the sidebar, go to **Workers & Pages** > **Create application**.
-3. Select the **Workers** tab and click **Connect to Git**.
-4. Authorize your GitHub account and select your forked repository (`your-username/DriveFlin`).
-5. Cloudflare will automatically detect the root [`wrangler.toml`](wrangler.toml) configuration file.
-6. Click **Save and Deploy**.
-
----
-
-### Step 3: Add D1 Database Binding & Media Credentials
-Once the first build finishes, connect the database and your media API credentials:
-
-1. In your Worker's dashboard, go to **Settings** > **Bindings**:
-   - Click **Add** > select **D1 Database**.
-   - **Variable name:** `DB` *(must be uppercase)*.
-   - Click **Create new database** (or select an existing one named `jellyfin_db_prod`) and click **Save**.
+2. In the left sidebar, navigate to **Storage & Databases** > **D1 SQL Database**.
+3. Click **Create database**.
+4. Under **Database name**, enter exactly: `jellyfin_db_prod`
+5. Click **Create**. That's it!
 
 > [!TIP]
 > **100% Built-In Automatic Database Initialization:**  
-> You do **NOT** need to open a SQL console, run terminal commands, or paste SQL scripts! DriveFlin automatically detects the fresh database and creates all tables, columns, indexes, and the default administrator account (`admin` / `admin`) on the very first time you open the site.
+> You do **NOT** need to open a SQL console, run terminal commands, or paste SQL scripts! DriveFlin automatically detects the new database and creates all tables, columns, indexes, and the default administrator account (`admin` / `admin`) on the very first time you open the site.
 
-2. In **Settings** > **Variables and Secrets**, add the following:
+---
+
+### Step 3: Connect Your Application to Cloudflare Workers
+1. In the left sidebar, navigate to **Workers & Pages**.
+2. Click the blue **Create application** button in the upper-right corner.
+3. In the *"Make something new"* modal, select **Connect GitHub** (or *Import a repository*).
+4. Under **Select a repository**:
+   - Select your GitHub account.
+   - Find and click on the **`DriveFlin`** repository.
+   - Click **Next**.
+5. On the **Set up your application** screen:
+   - **Project name:** `driveflin` *(or your preferred name)*.
+   - **Deploy command:** `npx wrangler deploy` *(pre-filled)*.
+   - Click the blue **Deploy** button!
+6. Cloudflare will start the build, detect the root `wrangler.toml`, and automatically link your `jellyfin_db_prod` database!
+
+---
+
+### Step 4: Add Media Variables and Secrets
+Once the initial deployment completes, add your Google Drive and TMDB credentials:
+
+1. In your Worker's dashboard (`driveflin`), navigate to **Settings** > **Variables and Secrets**.
+2. Click **Add** and insert the following variables:
    | Variable / Secret | Type | Description |
    | :--- | :--- | :--- |
    | `GDRIVE_CLIENT_ID` | Secret | Client ID generated in the Google Cloud Console. |
@@ -161,11 +175,15 @@ Once the first build finishes, connect the database and your media API credentia
    | `RCLONE_PASS` | Secret | *(Optional)* Password if your Google Drive files use Rclone Crypt. |
    | `RCLONE_SALT` | Secret | *(Optional)* Salt if your Google Drive files use Rclone Crypt. |
 
-3. Click **Save and Deploy** (or redeploy) to apply changes immediately.
+3. Click **Save and Deploy** to apply the changes.
+
+> [!NOTE]
+> **What if I clicked Deploy before creating the database?**  
+> If the deployment fails saying the database was not found, simply create the database named `jellyfin_db_prod` in **Storage & Databases > D1 SQL Database**, then click **Retry deployment** (or go to **Settings > Bindings > Add binding > D1 Database**, set variable name to `DB`, and select your database).
 
 ---
 
-### Step 4: Access the Web Interface and Configure Your Libraries
+### Step 5: Access the Web Interface and Configure Your Libraries
 1. Open your Worker's global public URL in your browser:  
    `https://driveflin.your-subdomain.workers.dev/web/index.html`
 2. **Automatic Initial Login:**

@@ -1,4 +1,4 @@
-﻿name = "driveflin"
+name = "driveflin"
 main = "src/index.ts"
 compatibility_date = "2024-04-05"
 
@@ -11,7 +11,6 @@ TMDB_API_KEY = "844dba0bfd8f3a4f3799f6130ef9e335"
 [[d1_databases]]
 binding = "DB"
 database_name = "jellyfin_db_prod"
-database_id = "c6187339-1f5c-4056-9bb3-af3cfc8c92fb"
 
 # Auto-scan Google Drive libraries every hour
 [triggers]

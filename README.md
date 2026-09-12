@@ -123,33 +123,47 @@ A instalação é 100% visual pelo navegador, sem necessidade de instalar ferram
 ### Passo 1: Fazer o Fork do Repositório
 1. No canto superior direito desta página no GitHub, clique no botão **Fork**.
 2. Selecione a sua conta pessoal e clique em **Create fork**.
-3. Agora você tem uma cópia completa e independente do DriveFlin na sua própria conta do GitHub.
+3. Agora você tem uma cópia completa e independente do DriveFlin na sua conta do GitHub.
 
 ---
 
-### Passo 2: Conectar o Repositório no Cloudflare Workers
+### Passo 2: Criar o Banco D1 na Cloudflare (Leva 10 segundos)
+> [!NOTE]
+> O banco de dados D1 é o armazenamento serverless onde o DriveFlin guarda suas bibliotecas, metadados e histórico. Ele deve ser criado na sua conta antes do deploy para que a Cloudflare o vincule automaticamente pelo nome.
+
 1. Acesse o painel da Cloudflare: [dash.cloudflare.com](https://dash.cloudflare.com).
-2. No menu lateral, vá em **Workers e Pages** > **Criar aplicativo** (Create application).
-3. Selecione a aba **Workers** e clique em **Conectar ao Git** (Connect to Git).
-4. Conecte sua conta do GitHub e selecione o seu repositório bifurcado (`seu-usuario/DriveFlin`).
-5. A Cloudflare detectará automaticamente o arquivo `wrangler.toml` presente na raiz do projeto.
-6. Clique em **Salvar e implantar** (Save and Deploy).
-
----
-
-### Passo 3: Adicionar a Vinculação do D1 e as Credenciais
-Após a primeira compilação do Worker, conecte o banco e suas credenciais de mídia:
-
-1. No seu Worker recém-criado, vá em **Configurações (Settings)** > **Vinculações (Bindings)**:
-   - Clique em **Adicionar (Add)** > selecione **Banco de dados D1 (D1 Database)**.
-   - **Nome da variável (Variable name):** `DB` *(exatamente em maiúsculas)*.
-   - Clique em **Criar novo banco de dados** (ou selecione um existente chamado `jellyfin_db_prod`) e clique em **Salvar (Save)**.
+2. No menu lateral esquerdo, vá em **Storage & Databases** (Armazenamento e bancos de dados) > **D1 SQL Database**.
+3. Clique em **Create database** (Criar banco de dados).
+4. Em **Database name**, digite exatamente: `jellyfin_db_prod`
+5. Clique em **Create** (Criar). Pronto!
 
 > [!TIP]
-> **Auto-Inicialização 100% Embutida e Automática:**  
-> Você **NÃO** precisa abrir console SQL, rodar comandos ou colar scripts! O próprio DriveFlin detecta o banco de dados novo e cria todas as tabelas, colunas, índices e o usuário administrador padrão (`admin` / `admin`) automaticamente no momento em que você abre o site pela primeira vez.
+> **Auto-Inicialização 100% Embutida:**  
+> Você **NÃO** precisa rodar SQL, comandos ou colar scripts! O próprio DriveFlin detecta o banco novo e cria todas as tabelas, índices e o usuário administrador padrão (`admin` / `admin`) automaticamente na primeira vez que você abrir o site.
 
-2. Em **Configurações (Settings)** > **Variáveis e Segredos (Variables and Secrets)**, adicione:
+---
+
+### Passo 3: Conectar a Aplicação no Cloudflare Workers
+1. No menu lateral esquerdo da Cloudflare, vá em **Workers & Pages**.
+2. Clique no botão azul **Create application** (Criar aplicativo) no canto superior direito.
+3. Na janela *"Make something new"*, selecione a opção **Connect GitHub** (ou *Import a repository*).
+4. Em **Select a repository**:
+   - Selecione a sua conta do GitHub.
+   - Encontre e clique no repositório **`DriveFlin`**.
+   - Clique em **Next** (Avançar).
+5. Na tela **Set up your application**:
+   - **Project name:** `driveflin` *(ou o nome que preferir)*.
+   - **Deploy command:** `npx wrangler deploy` *(já vem preenchido)*.
+   - Clique no botão azul **Deploy**!
+6. A Cloudflare iniciará a compilação, detectará o arquivo `wrangler.toml` na raiz e conectará automaticamente o seu banco `jellyfin_db_prod`!
+
+---
+
+### Passo 4: Configurar as Variáveis e Segredos
+Após a implantação, adicione suas chaves de API e conexão do Google Drive:
+
+1. No painel do seu Worker recém-criado (`driveflin`), vá em **Settings** (Configurações) > **Variables and Secrets** (Variáveis e Segredos).
+2. Clique em **Add** (Adicionar) e insira as seguintes variáveis:
    | Variável / Segredo | Tipo | Descrição |
    | :--- | :--- | :--- |
    | `GDRIVE_CLIENT_ID` | Secret | Client ID obtido no Google Cloud Console. |
@@ -161,11 +175,15 @@ Após a primeira compilação do Worker, conecte o banco e suas credenciais de m
    | `RCLONE_PASS` | Secret | *(Opcional)* Senha caso seus arquivos no Drive usem Rclone Crypt. |
    | `RCLONE_SALT` | Secret | *(Opcional)* Salt caso seus arquivos usem Rclone Crypt. |
 
-3. Clique em **Salvar e implantar** (Save and Deploy) para aplicar as alterações.
+3. Clique em **Save and Deploy** (Salvar e implantar).
+
+> [!NOTE]
+> **E se eu esquecer de criar o banco antes do deploy?**  
+> Se o deploy der erro de banco não encontrado, basta criar o banco `jellyfin_db_prod` no menu **Storage & Databases > D1 SQL Database** e depois clicar em **Retry deployment** (ou ir em **Settings > Bindings > Add binding > D1 Database**, nome da variável `DB`, e selecionar seu banco).
 
 ---
 
-### Passo 4: Acessar a Interface e Configurar suas Mídias
+### Passo 5: Acessar a Interface e Configurar suas Mídias
 1. Acesse o endereço do seu Worker fornecido pela Cloudflare:  
    `https://driveflin.seu-subdominio.workers.dev/web/index.html`
 2. **Login Inicial Automático:**
