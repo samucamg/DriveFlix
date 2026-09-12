@@ -124,7 +124,7 @@ import { injectScript } from "./inject";
 import { oauthHtml } from "./oauth_page";
 
 let schemaReady = false;
-async function ensureSchema(db: D1Database) {
+async function ensureSchema(db: D1Database, env?: any) {
   if (schemaReady) return;
   try {
     await db.batch([

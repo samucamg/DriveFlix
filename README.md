@@ -118,7 +118,7 @@ flowchart TD
 
 ## 🚀 Guia de Instalação e Deploy Visual na Cloudflare (Recomendado via Web)
 
-A forma mais simples, rápida e moderna de publicar o seu DriveFlin é utilizando a integração contínua da **Cloudflare com o GitHub**. Não é necessário instalar ferramentas no computador caso prefira fazer tudo pelo navegador.
+A instalação é 100% visual pelo navegador, sem necessidade de instalar ferramentas no computador nem rodar comandos no terminal.
 
 ### Passo 1: Fazer o Fork do Repositório
 1. No canto superior direito desta página no GitHub, clique no botão **Fork**.
@@ -127,34 +127,27 @@ A forma mais simples, rápida e moderna de publicar o seu DriveFlin é utilizand
 
 ---
 
-### Passo 2: Criar e Inicializar o Banco Cloudflare D1
+### Passo 2: Conectar o Repositório no Cloudflare Workers
 1. Acesse o painel da Cloudflare: [dash.cloudflare.com](https://dash.cloudflare.com).
-2. No menu lateral, navegue até **Workers e Pages** > **D1**.
-3. Clique em **Criar banco de dados** (Create Database).
-4. Defina o nome como `jellyfin_db_prod` (ou outro nome de sua preferência) e clique em **Criar**.
-5. Abra o banco criado e clique na aba **Console**.
-6. Abra o arquivo [`schema.sql`](schema.sql) deste repositório, copie todo o código SQL, cole na caixa do console da Cloudflare e clique em **Executar** (Execute).
-   - *Isso criará todas as tabelas necessárias e o usuário administrador padrão com login `admin` e senha `admin`.*
+2. No menu lateral, vá em **Workers e Pages** > **Criar aplicativo** (Create application).
+3. Selecione a aba **Workers** e clique em **Conectar ao Git** (Connect to Git).
+4. Conecte sua conta do GitHub e selecione o seu repositório bifurcado (`seu-usuario/DriveFlin`).
+5. A Cloudflare detectará automaticamente o arquivo `wrangler.toml` presente na raiz do projeto.
+6. Clique em **Salvar e implantar** (Save and Deploy).
 
 ---
 
-### Passo 3: Conectar o Repositório no Cloudflare Workers
-1. No painel da Cloudflare, vá em **Workers e Pages** > **Criar aplicativo** (Create application).
-2. Selecione a aba **Workers** e clique em **Conectar ao Git** (Connect to Git).
-3. Conecte sua conta do GitHub e selecione o seu repositório bifurcado (`seu-usuario/DriveFlin`).
-4. A Cloudflare detectará automaticamente o arquivo `wrangler.toml` presente na raiz do projeto.
-5. Clique em **Salvar e implantar** (Save and Deploy).
-
----
-
-### Passo 4: Configurar a Vinculação do D1 e as Variáveis de Ambiente
-Após a primeira compilação do Worker, precisamos conectar o banco e suas credenciais de mídia:
+### Passo 3: Adicionar a Vinculação do D1 e as Credenciais
+Após a primeira compilação do Worker, conecte o banco e suas credenciais de mídia:
 
 1. No seu Worker recém-criado, vá em **Configurações (Settings)** > **Vinculações (Bindings)**:
    - Clique em **Adicionar (Add)** > selecione **Banco de dados D1 (D1 Database)**.
    - **Nome da variável (Variable name):** `DB` *(exatamente em maiúsculas)*.
-   - **Banco D1:** Selecione o banco `jellyfin_db_prod` criado no Passo 2.
-   - Clique em **Salvar (Save)**.
+   - Clique em **Criar novo banco de dados** (ou selecione um existente chamado `jellyfin_db_prod`) e clique em **Salvar (Save)**.
+
+> [!TIP]
+> **Auto-Inicialização 100% Embutida e Automática:**  
+> Você **NÃO** precisa abrir console SQL, rodar comandos ou colar scripts! O próprio DriveFlin detecta o banco de dados novo e cria todas as tabelas, colunas, índices e o usuário administrador padrão (`admin` / `admin`) automaticamente no momento em que você abre o site pela primeira vez.
 
 2. Em **Configurações (Settings)** > **Variáveis e Segredos (Variables and Secrets)**, adicione:
    | Variável / Segredo | Tipo | Descrição |
@@ -172,10 +165,10 @@ Após a primeira compilação do Worker, precisamos conectar o banco e suas cred
 
 ---
 
-### Passo 5: Acessar a Interface e Configurar suas Mídias
+### Passo 4: Acessar a Interface e Configurar suas Mídias
 1. Acesse o endereço do seu Worker fornecido pela Cloudflare:  
    `https://driveflin.seu-subdominio.workers.dev/web/index.html`
-2. **Login Inicial Padrão:**
+2. **Login Inicial Automático:**
    - **Usuário:** `admin`
    - **Senha:** `admin`
 3. Vá em **Painel de Controle** (ícone de usuário > Painel) > **Bibliotecas**.

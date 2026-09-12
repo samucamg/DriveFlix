@@ -1,4 +1,4 @@
-﻿# 🎬 DriveFlin — Serverless Jellyfin on Cloudflare Workers & Google Drive
+# 🎬 DriveFlin — Serverless Jellyfin on Cloudflare Workers & Google Drive
 
 <p align="center">
   <a href="README.md"><img src="https://img.shields.io/badge/Portugu%C3%AAs-Brasil%20%F0%9F%87%A7%F0%9F%87%B7-2ea44f?style=for-the-badge" alt="Português (Brasil)"></a>
@@ -118,7 +118,7 @@ flowchart TD
 
 ## 🚀 Visual Cloudflare Setup & Deployment Guide (Recommended via Web)
 
-The simplest, fastest, and most modern way to publish your DriveFlin is via **Cloudflare's automated GitHub Git integration**. You do not need to install any command-line tools locally if you prefer deploying directly through your browser.
+Setup is 100% visual via your web browser, with no local CLI tools or command-line commands required.
 
 ### Step 1: Fork the Repository on GitHub
 1. In the upper-right corner of this GitHub repository page, click **Fork**.
@@ -127,34 +127,27 @@ The simplest, fastest, and most modern way to publish your DriveFlin is via **Cl
 
 ---
 
-### Step 2: Create and Initialize the Cloudflare D1 Database
+### Step 2: Connect Your Repository to Cloudflare Workers
 1. Log in to the Cloudflare dashboard: [dash.cloudflare.com](https://dash.cloudflare.com).
-2. In the sidebar menu, navigate to **Workers & Pages** > **D1**.
-3. Click **Create database**.
-4. Set the database name to `jellyfin_db_prod` (or any preferred name) and click **Create**.
-5. Click on your newly created database and open the **Console** tab.
-6. Open the [`schema.sql`](schema.sql) file from this repository, copy all SQL code, paste it into the Cloudflare console box, and click **Execute**.
-   - *This will create all required tables and seed the default administrator account with username `admin` and password `admin`.*
+2. In the sidebar, go to **Workers & Pages** > **Create application**.
+3. Select the **Workers** tab and click **Connect to Git**.
+4. Authorize your GitHub account and select your forked repository (`your-username/DriveFlin`).
+5. Cloudflare will automatically detect the root [`wrangler.toml`](wrangler.toml) configuration file.
+6. Click **Save and Deploy**.
 
 ---
 
-### Step 3: Connect Your Repository to Cloudflare Workers
-1. In the Cloudflare dashboard, go to **Workers & Pages** > **Create application**.
-2. Select the **Workers** tab and click **Connect to Git**.
-3. Authorize your GitHub account and select your forked repository (`your-username/DriveFlin`).
-4. Cloudflare will automatically detect the root [`wrangler.toml`](wrangler.toml) configuration file.
-5. Click **Save and Deploy**.
-
----
-
-### Step 4: Configure D1 Database Binding and Environment Variables
-Once the first deployment finishes, connect the database and your media API credentials:
+### Step 3: Add D1 Database Binding & Media Credentials
+Once the first build finishes, connect the database and your media API credentials:
 
 1. In your Worker's dashboard, go to **Settings** > **Bindings**:
    - Click **Add** > select **D1 Database**.
    - **Variable name:** `DB` *(must be uppercase)*.
-   - **D1 Database:** Select the `jellyfin_db_prod` database created in Step 2.
-   - Click **Save**.
+   - Click **Create new database** (or select an existing one named `jellyfin_db_prod`) and click **Save**.
+
+> [!TIP]
+> **100% Built-In Automatic Database Initialization:**  
+> You do **NOT** need to open a SQL console, run terminal commands, or paste SQL scripts! DriveFlin automatically detects the fresh database and creates all tables, columns, indexes, and the default administrator account (`admin` / `admin`) on the very first time you open the site.
 
 2. In **Settings** > **Variables and Secrets**, add the following:
    | Variable / Secret | Type | Description |
@@ -172,10 +165,10 @@ Once the first deployment finishes, connect the database and your media API cred
 
 ---
 
-### Step 5: Access the Web Interface and Configure Your Libraries
+### Step 4: Access the Web Interface and Configure Your Libraries
 1. Open your Worker's global public URL in your browser:  
    `https://driveflin.your-subdomain.workers.dev/web/index.html`
-2. **Default Factory Credentials:**
+2. **Automatic Initial Login:**
    - **Username:** `admin`
    - **Password:** `admin`
 3. Open the **Dashboard** (User avatar icon > Dashboard) > **Libraries**.
